@@ -7,8 +7,9 @@
   "observability": {
     "enabled": true
   },
-  // staging を実運用 env として扱う。CF Access Application は別途 dashboard で
-  // 作成し、`CF_ACCESS_TEAM_DOMAIN` / `CF_ACCESS_AUD` を実値に置換する。
+  // staging を実運用 env として扱う。CF Access Application は CF Zero Trust
+  // dashboard で作成済み (team domain mtamaramu、AUD は下記)。Google OAuth
+  // IdP 経由で `/api/*` を保護する。
   //
   // GCP は Cloud Run proxy (ippoan/secrets-inventory-gcp) 経由でアクセス。
   // `GCP_PROXY_URL` は Cloud Run staging service の実 URL に確定済み。
@@ -17,8 +18,8 @@
   // GCP_PROXY_API_KEY (shared secret) と GitHub PAT / CF API token の 3 binding
   // のみ宣言。KV namespace は PR3 (snapshot diff) で追加する。
   "vars": {
-    "CF_ACCESS_TEAM_DOMAIN": "placeholder-team",
-    "CF_ACCESS_AUD": "placeholder-aud",
+    "CF_ACCESS_TEAM_DOMAIN": "mtamaramu.cloudflareaccess.com",
+    "CF_ACCESS_AUD": "7cdf1cb650bc61c5827070e2a9df96166362f7c36934bcc5bf271c738af99b3f",
     "CF_ACCOUNT_ID": "24b45709d060d957340180e995f0d373",
     "CF_STORE_ID": "bd7bc91a3e5f4111add4acf6cb4b8733",
     "GITHUB_ORG": "ippoan",
@@ -49,8 +50,8 @@
       "workers_dev": true,
       "observability": { "enabled": true },
       "vars": {
-        "CF_ACCESS_TEAM_DOMAIN": "placeholder-team",
-        "CF_ACCESS_AUD": "placeholder-aud",
+        "CF_ACCESS_TEAM_DOMAIN": "mtamaramu.cloudflareaccess.com",
+        "CF_ACCESS_AUD": "7cdf1cb650bc61c5827070e2a9df96166362f7c36934bcc5bf271c738af99b3f",
         "CF_ACCOUNT_ID": "24b45709d060d957340180e995f0d373",
         "CF_STORE_ID": "bd7bc91a3e5f4111add4acf6cb4b8733",
         "GITHUB_ORG": "ippoan",
