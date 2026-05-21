@@ -14,9 +14,13 @@
   // GCP は Cloud Run proxy (ippoan/secrets-inventory-gcp) 経由でアクセス。
   // `GCP_PROXY_URL` は Cloud Run staging service の実 URL に確定済み。
   //
-  // Secrets Store / KV namespace は未 provision 部分があるため、現時点では
-  // GCP_PROXY_API_KEY (shared secret) と GitHub PAT / CF API token の 3 binding
-  // のみ宣言。KV namespace は PR3 (snapshot diff) で追加する。
+  // Secrets Store binding: GCP_PROXY_API_KEY (shared secret) + GitHub PAT +
+  // CF API token の 3 種。
+  //
+  // KV (snapshot): PR3 で provision 済 (binding `SNAPSHOT_KV`)。前回の GCP
+  // secret 名一覧を `snapshot:gcp:latest` キーに保持し、差分検知に使う。
+  // 同じ namespace を staging と top-level 両方に渡している (top-level は
+  // `wrangler dev` 用)。
   "vars": {
     "CF_ACCESS_TEAM_DOMAIN": "mtamaramu.cloudflareaccess.com",
     "CF_ACCESS_AUD": "7cdf1cb650bc61c5827070e2a9df96166362f7c36934bcc5bf271c738af99b3f",
@@ -41,6 +45,12 @@
       "binding": "GCP_PROXY_API_KEY",
       "store_id": "bd7bc91a3e5f4111add4acf6cb4b8733",
       "secret_name": "secrets-inventory-gcp-proxy-api-key"
+    }
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "SNAPSHOT_KV",
+      "id": "e23574b972844be4b8b5624e67d4eb56"
     }
   ],
   "env": {
@@ -73,6 +83,12 @@
           "binding": "GCP_PROXY_API_KEY",
           "store_id": "bd7bc91a3e5f4111add4acf6cb4b8733",
           "secret_name": "secrets-inventory-gcp-proxy-api-key"
+        }
+      ],
+      "kv_namespaces": [
+        {
+          "binding": "SNAPSHOT_KV",
+          "id": "e23574b972844be4b8b5624e67d4eb56"
         }
       ]
     }
