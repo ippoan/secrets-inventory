@@ -51,7 +51,10 @@ export function renderInventoryPage(
 
   <section class="summary">
     <div class="summary-item">
-      <strong>Total</strong>: ${result.rows.length}
+      <strong>Total (GCP)</strong>: ${result.rows.length}
+    </div>
+    <div class="summary-item">
+      <strong>Fetched</strong>: ${renderProviderCounts(result.provider_counts)}
     </div>
     <div class="summary-item">
       <strong>Diff (vs 前回 snapshot)</strong>: ${diffSummary}
@@ -132,6 +135,25 @@ function renderRow(row: InventoryRow, projectId: string): string {
     <td>${markCell(row.in_cloudflare)}</td>
     <td class="ts">${row.gcp.created_at ? escapeHtml(row.gcp.created_at) : '<span class="muted">—</span>'}</td>
   </tr>`;
+}
+
+function renderProviderCounts(counts: {
+  gcp: number;
+  github: number | null;
+  cloudflare: number | null;
+}): string {
+  const cell = (label: string, n: number | null) => {
+    if (n === null) {
+      return `<span class="badge badge-removed">${label}: failed</span>`;
+    }
+    // 0 件も成功 (empty list) を区別したいので badge-ok にしておく
+    return `<span class="badge badge-ok">${label}: ${n}</span>`;
+  };
+  return `
+    ${cell("GCP", counts.gcp)}
+    ${cell("GitHub", counts.github)}
+    ${cell("Cloudflare", counts.cloudflare)}
+  `;
 }
 
 function renderDiffSummary(diff: { added: string[]; removed: string[] }): string {

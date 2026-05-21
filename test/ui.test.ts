@@ -15,6 +15,7 @@ function baseResult(overrides: Partial<InventoryResult> = {}): InventoryResult {
     snapshot_at: null,
     snapshot_committed: false,
     errors: {},
+    provider_counts: { gcp: 0, github: 0, cloudflare: 0 },
     ...overrides,
   };
 }
@@ -100,11 +101,37 @@ describe("renderInventoryPage", () => {
           },
         ],
         errors: { github: "401 Unauthorized" },
+        provider_counts: { gcp: 1, github: null, cloudflare: 0 },
       }),
     );
     expect(html).toMatch(/aria-label="unknown"/);
     expect(html).toContain("GitHub fetch failed");
     expect(html).toContain("401 Unauthorized");
+    // failed provider は "failed" バッジで明示
+    expect(html).toContain("GitHub: failed");
+  });
+
+  it("renders 'Fetched' counts per provider in the summary", () => {
+    const html = renderInventoryPage(
+      baseResult({
+        provider_counts: { gcp: 34, github: 12, cloudflare: 5 },
+        rows: [],
+      }),
+    );
+    expect(html).toContain("GCP: 34");
+    expect(html).toContain("GitHub: 12");
+    expect(html).toContain("Cloudflare: 5");
+  });
+
+  it("renders 'github: 0' (not failed) when GitHub fetched successfully but empty", () => {
+    const html = renderInventoryPage(
+      baseResult({
+        provider_counts: { gcp: 1, github: 0, cloudflare: 1 },
+      }),
+    );
+    // 0 件取得 (= empty list) と fetch 失敗 (= null) を区別する
+    expect(html).toContain("GitHub: 0");
+    expect(html).not.toContain("GitHub: failed");
   });
 
   it("renders a positive hint when snapshot was just committed", () => {

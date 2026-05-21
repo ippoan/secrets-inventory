@@ -19,6 +19,16 @@ export interface InventoryResult {
   snapshot_committed: boolean;
   /** github / cloudflare が落ちた時のメッセージ。GCP が落ちると throw。 */
   errors: { github?: string; cloudflare?: string };
+  /**
+   * 各 provider の取得件数。`null` は fetch 失敗 (errors に reason 入り)。
+   * 「赤バナーが出ていないだけで、何件取れたか分からない」を UI 側で
+   * 解消するために生件数を持っておく。
+   */
+  provider_counts: {
+    gcp: number;
+    github: number | null;
+    cloudflare: number | null;
+  };
 }
 
 /**
@@ -114,6 +124,11 @@ export async function gatherInventory(
     snapshot_at: snapshotAt,
     snapshot_committed: opts.commitSnapshot === true,
     errors,
+    provider_counts: {
+      gcp: gcp.length,
+      github: github === null ? null : github.length,
+      cloudflare: cloudflare === null ? null : cloudflare.length,
+    },
   };
 }
 
