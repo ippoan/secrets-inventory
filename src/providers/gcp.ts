@@ -19,10 +19,15 @@ export interface GcpProxyContext {
  * Cloud Run proxy (ippoan/secrets-inventory-gcp) `main.go` の `secretItem`
  * と 1:1 対応。`name` は proxy 側で `projects/.../secrets/` prefix を剥がした
  * 短縮名で来るが、Worker 側でも shortName() を idempotent にかけて防御する。
+ *
+ * `updated_at` は proxy で「親 secret の latest version の create_time」を
+ * expose したもの (= 最後の rotation 時刻)。proxy 旧 version は未対応で
+ * undefined になり得るので optional + 受け側は null fallback。
  */
 interface ProxyRawSecret {
   name: string;
   created_at?: string;
+  updated_at?: string;
   labels?: Record<string, string>;
 }
 
@@ -62,6 +67,7 @@ export async function listGcpSecrets(
   return (raw.secrets ?? []).map((s) => ({
     name: shortName(s.name),
     created_at: s.created_at ?? null,
+    updated_at: s.updated_at ?? null,
     extra: {
       labels: s.labels ?? {},
     },

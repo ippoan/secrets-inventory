@@ -53,6 +53,8 @@ describe("renderInventoryPage", () => {
             gcp: { name: "STRIPE_API_KEY", created_at: "2026-01-01T00:00:00Z" },
             in_github: true,
             in_cloudflare: false,
+            github: null,
+            cloudflare: null,
             is_new_since_snapshot: false,
           },
         ],
@@ -76,6 +78,8 @@ describe("renderInventoryPage", () => {
             gcp: { name: "NEW_SECRET", created_at: null },
             in_github: false,
             in_cloudflare: false,
+            github: null,
+            cloudflare: null,
             is_new_since_snapshot: true,
           },
         ],
@@ -97,6 +101,8 @@ describe("renderInventoryPage", () => {
             gcp: { name: "X" },
             in_github: null,
             in_cloudflare: false,
+            github: null,
+            cloudflare: null,
             is_new_since_snapshot: false,
           },
         ],
@@ -153,6 +159,8 @@ describe("renderInventoryPage", () => {
             gcp: { name: "X" },
             in_github: true,
             in_cloudflare: true,
+            github: null,
+            cloudflare: null,
             is_new_since_snapshot: false,
           },
         ],
@@ -173,12 +181,125 @@ describe("renderInventoryPage", () => {
             gcp: { name: "TOKEN", created_at: "2026-01-01T00:00:00Z" },
             in_github: true,
             in_cloudflare: true,
+            github: null,
+            cloudflare: null,
             is_new_since_snapshot: false,
           },
         ],
       }),
     );
     expect(html).not.toMatch(/secret_value|"value"/i);
+  });
+
+  it("renders ⚠ when a provider row is older than GCP (possible stale rotation)", () => {
+    const html = renderInventoryPage(
+      baseResult({
+        rows: [
+          {
+            name: "STRIPE_API_KEY",
+            gcp: {
+              name: "STRIPE_API_KEY",
+              created_at: "2026-01-01T00:00:00Z",
+              updated_at: "2026-04-01T00:00:00Z", // GCP rotated 2026-04
+            },
+            in_github: true,
+            in_cloudflare: true,
+            github: {
+              name: "STRIPE_API_KEY",
+              created_at: "2026-01-01T00:00:00Z",
+              updated_at: "2026-02-01T00:00:00Z", // GitHub copy is older
+            },
+            cloudflare: {
+              name: "STRIPE_API_KEY",
+              created_at: "2026-01-01T00:00:00Z",
+              updated_at: "2026-04-05T00:00:00Z", // CF copy newer than GCP, OK
+            },
+            is_new_since_snapshot: false,
+          },
+        ],
+      }),
+    );
+    // GitHub 列は ⚠ (stale)
+    expect(html).toMatch(/aria-label="stale"[^>]*>⚠</);
+    expect(html).toContain("provider copy is older than GCP");
+    // CF 列は ✓ (GCP より新しい / 同等なら問題なし)
+    // ⚠ は 1 つだけ (GitHub のみ)
+    const warnCount = (html.match(/aria-label="stale"/g) ?? []).length;
+    expect(warnCount).toBe(1);
+  });
+
+  it("does NOT mark stale when provider has no timestamp (cannot judge → ✓)", () => {
+    const html = renderInventoryPage(
+      baseResult({
+        rows: [
+          {
+            name: "X",
+            gcp: { name: "X", updated_at: "2026-04-01T00:00:00Z" },
+            in_github: true,
+            in_cloudflare: false,
+            github: null, // matched flag is true but metadata is missing
+            cloudflare: null,
+            is_new_since_snapshot: false,
+          },
+        ],
+      }),
+    );
+    // metadata 不足だけで stale 扱いはしない (= false positive 回避)
+    expect(html).not.toMatch(/aria-label="stale"/);
+  });
+
+  it("table header shows match count per provider column", () => {
+    const html = renderInventoryPage(
+      baseResult({
+        rows: [
+          {
+            name: "A",
+            gcp: { name: "A" },
+            in_github: true,
+            in_cloudflare: false,
+            github: null,
+            cloudflare: null,
+            is_new_since_snapshot: false,
+          },
+          {
+            name: "B",
+            gcp: { name: "B" },
+            in_github: false,
+            in_cloudflare: true,
+            github: null,
+            cloudflare: null,
+            is_new_since_snapshot: false,
+          },
+        ],
+        provider_counts: { gcp: 2, github: 10, cloudflare: 5 },
+      }),
+    );
+    // GCP 列ヘッダー: 件数だけ (source of truth)
+    expect(html).toMatch(/GCP <span class="muted">\(2\)<\/span>/);
+    // GitHub 列ヘッダー: (matched/total fetched)
+    expect(html).toMatch(/GitHub <span class="muted">\(1\/10\)<\/span>/);
+    expect(html).toMatch(/Cloudflare <span class="muted">\(1\/5\)<\/span>/);
+  });
+
+  it("table header shows (?) when provider fetch failed", () => {
+    const html = renderInventoryPage(
+      baseResult({
+        rows: [
+          {
+            name: "A",
+            gcp: { name: "A" },
+            in_github: null,
+            in_cloudflare: true,
+            github: null,
+            cloudflare: null,
+            is_new_since_snapshot: false,
+          },
+        ],
+        provider_counts: { gcp: 1, github: null, cloudflare: 1 },
+        errors: { github: "fail" },
+      }),
+    );
+    expect(html).toMatch(/GitHub <span class="muted">\(\?\)<\/span>/);
   });
 
   it("links secret names to per-secret GCP console URL", () => {
@@ -190,6 +311,8 @@ describe("renderInventoryPage", () => {
             gcp: { name: "FOO" },
             in_github: true,
             in_cloudflare: true,
+            github: null,
+            cloudflare: null,
             is_new_since_snapshot: false,
           },
         ],

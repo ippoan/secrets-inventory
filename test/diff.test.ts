@@ -115,4 +115,49 @@ describe("buildInventory", () => {
     });
     expect(rows[0]?.gcp).toBe(meta);
   });
+
+  it("threads matched provider metadata into row.github / row.cloudflare", () => {
+    const ghMeta: SecretMetadata = {
+      name: "X",
+      created_at: "2026-02-01T00:00:00Z",
+      updated_at: "2026-04-01T00:00:00Z",
+    };
+    const cfMeta: SecretMetadata = {
+      name: "X",
+      created_at: "2026-01-15T00:00:00Z",
+      updated_at: "2026-03-15T00:00:00Z",
+    };
+    const { rows } = buildInventory({
+      gcp: [s("X")],
+      github: [ghMeta],
+      cloudflare: [cfMeta],
+      previousGcpNames: null,
+    });
+    expect(rows[0]?.github).toBe(ghMeta);
+    expect(rows[0]?.cloudflare).toBe(cfMeta);
+  });
+
+  it("row.github / row.cloudflare null when name not in provider", () => {
+    const { rows } = buildInventory({
+      gcp: [s("X")],
+      github: [s("Y")],
+      cloudflare: [s("Z")],
+      previousGcpNames: null,
+    });
+    expect(rows[0]?.in_github).toBe(false);
+    expect(rows[0]?.github).toBeNull();
+    expect(rows[0]?.in_cloudflare).toBe(false);
+    expect(rows[0]?.cloudflare).toBeNull();
+  });
+
+  it("row.github / row.cloudflare null when provider fetch failed (in_x===null)", () => {
+    const { rows } = buildInventory({
+      gcp: [s("X")],
+      github: null,
+      cloudflare: null,
+      previousGcpNames: null,
+    });
+    expect(rows[0]?.github).toBeNull();
+    expect(rows[0]?.cloudflare).toBeNull();
+  });
 });

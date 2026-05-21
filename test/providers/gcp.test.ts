@@ -116,6 +116,24 @@ describe("listGcpSecrets (Cloud Run proxy)", () => {
     const items = await listGcpSecrets(ctx);
     expect(items[0]?.name).toBe("MIN");
     expect(items[0]?.created_at).toBeNull();
+    expect(items[0]?.updated_at).toBeNull();
     expect((items[0]?.extra as { labels: Record<string, string> }).labels).toEqual({});
+  });
+
+  it("maps updated_at (latest version create_time) when proxy returns it", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json({
+        secrets: [
+          {
+            name: "ROTATED",
+            created_at: "2026-01-01T00:00:00Z",
+            updated_at: "2026-04-10T09:00:00Z",
+          },
+        ],
+      }),
+    );
+    const items = await listGcpSecrets(ctx);
+    expect(items[0]?.created_at).toBe("2026-01-01T00:00:00Z");
+    expect(items[0]?.updated_at).toBe("2026-04-10T09:00:00Z");
   });
 });

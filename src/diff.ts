@@ -7,12 +7,18 @@ import type { SecretMetadata } from "./types";
  * `in_github` / `in_cloudflare` が `null` の場合は「該当プロバイダーの取得が
  * 失敗したので不明」を表す (partial-success 表示用)。`false` は「取れたが
  * 同名が存在しなかった」=反映漏れの可能性。
+ *
+ * `github` / `cloudflare` フィールドは、同名 secret のメタデータ
+ * (created_at / updated_at / extra) を tooltip 等で出すための実体。
+ * `null` = 未マッチ or provider 失敗。
  */
 export interface InventoryRow {
   name: string;
   gcp: SecretMetadata;
   in_github: boolean | null;
   in_cloudflare: boolean | null;
+  github: SecretMetadata | null;
+  cloudflare: SecretMetadata | null;
   is_new_since_snapshot: boolean;
 }
 
@@ -37,12 +43,14 @@ export function buildInventory(input: InventoryInputs): {
   rows: InventoryRow[];
   diff: InventoryDiff;
 } {
-  const ghNames =
-    input.github === null ? null : new Set(input.github.map((s) => s.name));
-  const cfNames =
+  const ghByName =
+    input.github === null
+      ? null
+      : new Map(input.github.map((s) => [s.name, s]));
+  const cfByName =
     input.cloudflare === null
       ? null
-      : new Set(input.cloudflare.map((s) => s.name));
+      : new Map(input.cloudflare.map((s) => [s.name, s]));
 
   const hasPrevious = input.previousGcpNames !== null;
   const previousSet = new Set(input.previousGcpNames ?? []);
@@ -54,8 +62,10 @@ export function buildInventory(input: InventoryInputs): {
     .map((s) => ({
       name: s.name,
       gcp: s,
-      in_github: ghNames === null ? null : ghNames.has(s.name),
-      in_cloudflare: cfNames === null ? null : cfNames.has(s.name),
+      in_github: ghByName === null ? null : ghByName.has(s.name),
+      in_cloudflare: cfByName === null ? null : cfByName.has(s.name),
+      github: ghByName?.get(s.name) ?? null,
+      cloudflare: cfByName?.get(s.name) ?? null,
       is_new_since_snapshot: hasPrevious && !previousSet.has(s.name),
     }));
 
