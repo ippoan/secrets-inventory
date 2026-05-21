@@ -1,5 +1,6 @@
 import type { InventoryResult } from "./inventory";
 import type { InventoryRow } from "./diff";
+import type { SecretMetadata } from "./types";
 import { gcpConsoleListUrl, gcpConsoleSecretUrl } from "./gcp-console";
 
 /**
@@ -22,6 +23,18 @@ export function renderInventoryPage(
     : "";
 
   const diffSummary = renderDiffSummary(result.diff);
+
+  // 列ヘッダーに「マッチ数 / 取得総数」を出すための集計。
+  // - GCP は全行マッチ (= source of truth) なので分母を出さず数だけ
+  // - GitHub / CF: 分子 = この GCP 一覧と名前突合できた数 (= in_X===true)
+  //                分母 = provider 側の総取得数 (= provider_counts)
+  // provider_counts が null = fetch 失敗で分母不明、ヘッダーは `(?)` 表記
+  let ghMatch = 0;
+  let cfMatch = 0;
+  for (const r of result.rows) {
+    if (r.in_github === true) ghMatch++;
+    if (r.in_cloudflare === true) cfMatch++;
+  }
 
   const rowsHtml = result.rows
     .map((r) => renderRow(r, projectId))
@@ -76,9 +89,9 @@ export function renderInventoryPage(
     <thead>
       <tr>
         <th scope="col">Name</th>
-        <th scope="col">GCP</th>
-        <th scope="col">GitHub</th>
-        <th scope="col">Cloudflare</th>
+        <th scope="col">GCP <span class="muted">(${result.rows.length})</span></th>
+        <th scope="col">GitHub ${renderHeaderCount(ghMatch, result.provider_counts.github)}</th>
+        <th scope="col">Cloudflare ${renderHeaderCount(cfMatch, result.provider_counts.cloudflare)}</th>
         <th scope="col">GCP created</th>
       </tr>
     </thead>
@@ -130,11 +143,27 @@ function renderRow(row: InventoryRow, projectId: string): string {
         ${escapeHtml(row.name)}
       </a>${newBadge}
     </td>
-    <td>${MARK_PRESENT}</td>
-    <td>${markCell(row.in_github)}</td>
-    <td>${markCell(row.in_cloudflare)}</td>
+    <td>${markPresentCell(row.gcp)}</td>
+    <td>${markCell(row.in_github, row.github, row.gcp)}</td>
+    <td>${markCell(row.in_cloudflare, row.cloudflare, row.gcp)}</td>
     <td class="ts">${row.gcp.created_at ? escapeHtml(row.gcp.created_at) : '<span class="muted">—</span>'}</td>
   </tr>`;
+}
+
+/**
+ * 列ヘッダーの右に出すマッチ数バッジ。
+ * - 取得成功: `(matchCount/totalFetched)`
+ * - 取得失敗: `(?)` (= 分母不明)
+ *
+ * Cloudflare / GitHub list API は **last accessed timestamp は返さない**
+ * (= access 監査は audit log 側の責務)。created / updated は each row の
+ * tooltip に出す。
+ */
+function renderHeaderCount(matchCount: number, totalFetched: number | null): string {
+  if (totalFetched === null) {
+    return `<span class="muted">(?)</span>`;
+  }
+  return `<span class="muted">(${matchCount}/${totalFetched})</span>`;
 }
 
 function renderProviderCounts(counts: {
@@ -183,13 +212,89 @@ function renderErrorBanners(errors: { github?: string; cloudflare?: string }): s
   return parts.join("\n");
 }
 
-const MARK_PRESENT = `<span class="check" aria-label="present">✓</span>`;
-const MARK_ABSENT = `<span class="cross" aria-label="absent">✗</span>`;
-const MARK_UNKNOWN = `<span class="unknown" aria-label="unknown" title="fetch 失敗のため不明">?</span>`;
+/**
+ * ✓ / ⚠ / ✗ / ? + tooltip。
+ *
+ * - `present === null` → ? (provider fetch 失敗)
+ * - `present === false` → ✗ (配布先に同名無し、反映漏れ候補)
+ * - `present === true` + provider が GCP より **古い timestamp** → ⚠
+ *   (= 配布先コピーが stale。GCP 側の rotation に追従していない可能性)
+ * - `present === true` + provider が GCP 同等 or 新しい → ✓
+ *
+ * 古さ判定の timestamp は「latest mutation」相当として:
+ *   - provider: max(created_at, updated_at)
+ *   - GCP: max(created_at, updated_at)
+ *
+ * 注意: 現状 GCP proxy は `Secret.create_time` (親 resource の作成時刻) のみ
+ * 返し、Version の `create_time` (= 最後の rotation 時刻) は返していない。
+ * 親 created_at と provider updated_at の比較は「provider が GCP secret
+ * 作成時より前」を検知するに留まる (GCP rotation 漏れの検知は別途 proxy
+ * 側で `latest_version.create_time` を expose する必要あり)。
+ *
+ * 「last accessed」は GCP / GitHub / CF いずれの list API も返さないため
+ * (audit log 側の責務)、本 UI では出せない。
+ */
+function markCell(
+  present: boolean | null,
+  meta: SecretMetadata | null,
+  gcpMeta: SecretMetadata,
+): string {
+  if (present === null) {
+    return `<span class="unknown" aria-label="unknown" title="fetch 失敗のため不明">?</span>`;
+  }
+  if (!present) {
+    return `<span class="cross" aria-label="absent" title="同名 secret は配布先に存在しない (反映漏れ候補)">✗</span>`;
+  }
+  const stale = isStaleVsGcp(meta, gcpMeta);
+  if (stale) {
+    return `<span class="warn" aria-label="stale" title="${escapeAttr(stale)}">⚠</span>`;
+  }
+  return `<span class="check" aria-label="present" title="${escapeAttr(buildMetaTooltip(meta))}">✓</span>`;
+}
 
-function markCell(b: boolean | null): string {
-  if (b === null) return MARK_UNKNOWN;
-  return b ? MARK_PRESENT : MARK_ABSENT;
+/** GCP は全行 present なので専用 cell。tooltip は GCP メタデータから組み立てる。 */
+function markPresentCell(meta: SecretMetadata): string {
+  return `<span class="check" aria-label="present" title="${escapeAttr(buildMetaTooltip(meta))}">✓</span>`;
+}
+
+function buildMetaTooltip(meta: SecretMetadata | null): string {
+  if (!meta) return "present";
+  const parts: string[] = [];
+  if (meta.created_at) parts.push(`created: ${meta.created_at}`);
+  if (meta.updated_at) parts.push(`updated: ${meta.updated_at}`);
+  return parts.length ? parts.join(" / ") : "present";
+}
+
+/**
+ * provider が GCP より古い時刻なら stale 説明文を返す。判定できない (どちらかの
+ * timestamp 欠落) 時は `null` で「不明=不問」扱い。
+ */
+function isStaleVsGcp(
+  providerMeta: SecretMetadata | null,
+  gcpMeta: SecretMetadata,
+): string | null {
+  if (!providerMeta) return null;
+  const providerTs = latestTimestamp(providerMeta);
+  const gcpTs = latestTimestamp(gcpMeta);
+  if (!providerTs || !gcpTs) return null;
+  const providerDate = Date.parse(providerTs);
+  const gcpDate = Date.parse(gcpTs);
+  if (Number.isNaN(providerDate) || Number.isNaN(gcpDate)) return null;
+  if (providerDate >= gcpDate) return null;
+  return `WARNING: provider copy is older than GCP (provider=${providerTs}, gcp=${gcpTs}) — possible un-propagated rotation`;
+}
+
+function latestTimestamp(meta: SecretMetadata): string | null {
+  const c = meta.created_at ?? null;
+  const u = meta.updated_at ?? null;
+  if (c && u) {
+    const cd = Date.parse(c);
+    const ud = Date.parse(u);
+    if (Number.isNaN(cd)) return u;
+    if (Number.isNaN(ud)) return c;
+    return ud >= cd ? u : c;
+  }
+  return u ?? c;
 }
 
 /**
@@ -293,6 +398,7 @@ const PAGE_STYLES = `
   .check   { color: #56d364; font-weight: 700; }
   .cross   { color: #ff7b72; font-weight: 700; }
   .unknown { color: #d29922; font-weight: 700; }
+  .warn    { color: #f0883e; font-weight: 700; cursor: help; }
   .err {
     background: #2d1b1b;
     border: 1px solid #ff7b72;
