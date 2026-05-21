@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { Hono } from "hono";
-import { uiRoutes } from "../../src/routes/ui";
+import { handleDashboard } from "../../src/routes/ui";
 import type { Env } from "../../src/types";
 
 function mockSecret(value: string): SecretsStoreSecret {
@@ -38,9 +38,14 @@ const baseEnv: Env = {
   SNAPSHOT_KV: makeKv(),
 };
 
+/**
+ * 本 handler は `src/index.ts` で root `/` に直接マウントされる。テストでも
+ * 同じ mount で叩いて挙動を確認する。CF Access middleware はここではテスト
+ * せず (cf-access.test.ts 側の責務)、handler 単独の HTML 出力だけ見る。
+ */
 function buildApp() {
   const app = new Hono<{ Bindings: Env }>();
-  app.route("/ui", uiRoutes);
+  app.get("/", handleDashboard);
   return app;
 }
 
@@ -52,7 +57,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("GET /ui", () => {
+describe("GET / (dashboard)", () => {
   it("returns 200 + HTML with content-type text/html", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = typeof input === "string" ? input : input.toString();
@@ -70,7 +75,7 @@ describe("GET /ui", () => {
       return new Response("?", { status: 500 });
     });
     const env = { ...baseEnv, SNAPSHOT_KV: makeKv() };
-    const res = await buildApp().request("/ui", {}, env);
+    const res = await buildApp().request("/", {}, env);
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")?.toLowerCase()).toMatch(/text\/html/);
     const html = await res.text();
@@ -87,7 +92,7 @@ describe("GET /ui", () => {
       return Response.json({});
     });
     const env = { ...baseEnv, SNAPSHOT_KV: makeKv() };
-    const res = await buildApp().request("/ui", {}, env);
+    const res = await buildApp().request("/", {}, env);
     expect(res.status).toBe(502);
     const html = await res.text();
     expect(html).toContain("GCP fetch failed");
@@ -110,7 +115,7 @@ describe("GET /ui", () => {
       return new Response("?", { status: 500 });
     });
     const env = { ...baseEnv, SNAPSHOT_KV: makeKv() };
-    const res = await buildApp().request("/ui?commit=1", {}, env);
+    const res = await buildApp().request("/?commit=1", {}, env);
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toMatch(/snapshot を .* で更新しました/);

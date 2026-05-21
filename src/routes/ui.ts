@@ -1,15 +1,16 @@
-import { Hono } from "hono";
+import type { Context } from "hono";
 import type { Env } from "../types";
 import { gatherInventory, GcpUnavailableError } from "../inventory";
 import { renderInventoryPage, renderErrorPage } from "../ui";
 
-export const uiRoutes = new Hono<{ Bindings: Env }>();
-
 /**
- * GET /ui — Cloudflare Access 経由でアクセスする突合 dashboard。
- * `?commit=1` で snapshot 更新も同 endpoint 上で行う。
+ * 突合 dashboard handler。本 Worker のルート (`/`) に直接マウントされる前提で、
+ * Cloudflare Access middleware の後段で動く。`?commit=1` で snapshot 更新も
+ * 同 endpoint 上で行う。
  */
-uiRoutes.get("/", async (c) => {
+export async function handleDashboard(
+  c: Context<{ Bindings: Env }>,
+): Promise<Response> {
   const commit = c.req.query("commit") === "1";
   try {
     const result = await gatherInventory(c.env, { commitSnapshot: commit });
@@ -20,4 +21,4 @@ uiRoutes.get("/", async (c) => {
     }
     throw err;
   }
-});
+}

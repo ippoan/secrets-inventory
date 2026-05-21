@@ -34,20 +34,19 @@ PR を上げると `frontend-ci.yml` 経由で staging に auto-deploy される
 
 ## エンドポイント
 
-`/api/*` と `/ui` 配下は Cloudflare Access (Google OAuth) 認証必須。
+`/` (dashboard) と `/api/*` (JSON) は Cloudflare Access (Google OAuth) 認証必須。
 
 | method | path | 説明 |
 |---|---|---|
 | GET | `/healthz` | 認証不要 health check |
-| GET | `/` | landing (link 集) |
-| GET | `/ui` | 突合 dashboard (HTML)。`?commit=1` で snapshot を更新 |
+| GET | `/` | 突合 dashboard (HTML)。`?commit=1` で snapshot を更新 |
 | GET | `/api/cloudflare/secrets` | CF Secrets Store のメタデータ list |
 | GET | `/api/github/secrets` | GitHub org Actions secrets のメタデータ list |
 | GET | `/api/gcp/secrets` | GCP Secret Manager のメタデータ list |
 | GET | `/api/all` | 3 プロバイダーを並列に叩いて 1 レスポンスにまとめる (partial success 対応) |
 | GET | `/api/inventory` | GCP 基準の突合 + 前回 snapshot との diff (JSON)。`?commit=1` で snapshot 更新 |
 
-### 突合 (`/api/inventory`, `/ui`)
+### 突合 (`/api/inventory`, `/`)
 
 GCP の名前一覧を基準に、各行 = 1 secret name で以下を返す:
 
@@ -142,7 +141,7 @@ CI 上では `ippoan/ci-workflows` の `frontend-ci.yml` 経由で:
 
 ```
 src/
-├── index.ts                  # Hono entry。/healthz + CF Access 必須 /api/* /ui
+├── index.ts                  # Hono entry。/healthz unprotected + CF Access 必須 / と /api/*
 ├── types.ts                  # Env / SecretMetadata 等の共通型
 ├── diff.ts                   # 突合 + 差分検知の pure ロジック
 ├── snapshot.ts               # KV (SNAPSHOT_KV) への前回スナップショット r/w
@@ -158,7 +157,7 @@ src/
 └── routes/
     ├── list.ts               # /api/{provider}/secrets と /api/all
     ├── inventory.ts          # /api/inventory (JSON)
-    └── ui.ts                 # /ui (HTML dashboard)
+    └── ui.ts                 # / (HTML dashboard handler)
 ```
 
 新しい provider を足す場合は `src/providers/*.ts` に list 関数を書き、
