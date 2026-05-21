@@ -6,43 +6,39 @@
   "observability": {
     "enabled": true
   },
-  // CF Access (Google OAuth) は Cloudflare Dashboard 側で Application を作成し、
-  // この Worker route を保護する。Team domain と AUD は Access > Application から取得。
-  // GitHub PAT / GCP SA 鍵 / Cloudflare API token はすべて Secrets Store binding 経由で
-  // 受け取り、平文の値は会話にも UI にも乗せない。
+  // staging を実運用 env として扱う。CF Access Application は別途 dashboard で
+  // 作成し、`CF_ACCESS_TEAM_DOMAIN` / `CF_ACCESS_AUD` を実値に置換する。
+  //
+  // GCP は Cloud Run proxy (ippoan/secrets-inventory-gcp) 経由でアクセス。
+  // proxy URL は Cloud Run deploy 完了時に確定するので、それまで placeholder。
+  //
+  // Secrets Store / KV namespace は未 provision 部分があるため、現時点では
+  // GCP_PROXY_API_KEY (shared secret) と GitHub PAT / CF API token の 3 binding
+  // のみ宣言。KV namespace は PR3 (snapshot diff) で追加する。
   "vars": {
-    // CF Access
-    "CF_ACCESS_TEAM_DOMAIN": "REPLACE_WITH_TEAM_DOMAIN",
-    "CF_ACCESS_AUD": "REPLACE_WITH_APPLICATION_AUD",
-    // Cloudflare (突合対象)
-    "CF_ACCOUNT_ID": "REPLACE_WITH_ACCOUNT_ID",
-    "CF_STORE_ID": "REPLACE_WITH_STORE_ID",
-    // GitHub (突合対象)
-    "GITHUB_ORG": "REPLACE_WITH_ORG",
-    // GCP (正)
-    "GCP_PROJECT_ID": "REPLACE_WITH_PROJECT_ID"
+    "CF_ACCESS_TEAM_DOMAIN": "placeholder-team",
+    "CF_ACCESS_AUD": "placeholder-aud",
+    "CF_ACCOUNT_ID": "24b45709d060d957340180e995f0d373",
+    "CF_STORE_ID": "bd7bc91a3e5f4111add4acf6cb4b8733",
+    "GITHUB_ORG": "ippoan",
+    "GCP_PROJECT_ID": "cloudsql-sv",
+    "GCP_PROXY_URL": "https://secrets-inventory-gcp-placeholder.run.app"
   },
   "secrets_store_secrets": [
     {
       "binding": "CF_API_TOKEN",
-      "store_id": "REPLACE_WITH_STORE_ID",
-      "secret_name": "SECRETS_INVENTORY_CF_API_TOKEN"
+      "store_id": "bd7bc91a3e5f4111add4acf6cb4b8733",
+      "secret_name": "secrets-inventory-secrets-store-read"
     },
     {
       "binding": "GITHUB_PAT",
-      "store_id": "REPLACE_WITH_STORE_ID",
-      "secret_name": "SECRETS_INVENTORY_GITHUB_PAT"
+      "store_id": "bd7bc91a3e5f4111add4acf6cb4b8733",
+      "secret_name": "gh-secrets-inventory-org-secrets-read"
     },
     {
-      "binding": "GCP_SA_KEY",
-      "store_id": "REPLACE_WITH_STORE_ID",
-      "secret_name": "SECRETS_INVENTORY_GCP_SA_KEY"
-    }
-  ],
-  "kv_namespaces": [
-    {
-      "binding": "SNAPSHOT_KV",
-      "id": "REPLACE_WITH_KV_NAMESPACE_ID"
+      "binding": "GCP_PROXY_API_KEY",
+      "store_id": "bd7bc91a3e5f4111add4acf6cb4b8733",
+      "secret_name": "secrets-inventory-gcp-proxy-api-key"
     }
   ],
   "env": {
@@ -51,34 +47,29 @@
       "workers_dev": true,
       "observability": { "enabled": true },
       "vars": {
-        "CF_ACCESS_TEAM_DOMAIN": "REPLACE_WITH_TEAM_DOMAIN",
-        "CF_ACCESS_AUD": "REPLACE_WITH_STAGING_APPLICATION_AUD",
-        "CF_ACCOUNT_ID": "REPLACE_WITH_ACCOUNT_ID",
-        "CF_STORE_ID": "REPLACE_WITH_STAGING_STORE_ID",
-        "GITHUB_ORG": "REPLACE_WITH_ORG",
-        "GCP_PROJECT_ID": "REPLACE_WITH_STAGING_PROJECT_ID"
+        "CF_ACCESS_TEAM_DOMAIN": "placeholder-team",
+        "CF_ACCESS_AUD": "placeholder-aud",
+        "CF_ACCOUNT_ID": "24b45709d060d957340180e995f0d373",
+        "CF_STORE_ID": "bd7bc91a3e5f4111add4acf6cb4b8733",
+        "GITHUB_ORG": "ippoan",
+        "GCP_PROJECT_ID": "cloudsql-sv",
+        "GCP_PROXY_URL": "https://secrets-inventory-gcp-placeholder.run.app"
       },
       "secrets_store_secrets": [
         {
           "binding": "CF_API_TOKEN",
-          "store_id": "REPLACE_WITH_STAGING_STORE_ID",
-          "secret_name": "SECRETS_INVENTORY_CF_API_TOKEN"
+          "store_id": "bd7bc91a3e5f4111add4acf6cb4b8733",
+          "secret_name": "secrets-inventory-secrets-store-read"
         },
         {
           "binding": "GITHUB_PAT",
-          "store_id": "REPLACE_WITH_STAGING_STORE_ID",
-          "secret_name": "SECRETS_INVENTORY_GITHUB_PAT"
+          "store_id": "bd7bc91a3e5f4111add4acf6cb4b8733",
+          "secret_name": "gh-secrets-inventory-org-secrets-read"
         },
         {
-          "binding": "GCP_SA_KEY",
-          "store_id": "REPLACE_WITH_STAGING_STORE_ID",
-          "secret_name": "SECRETS_INVENTORY_GCP_SA_KEY"
-        }
-      ],
-      "kv_namespaces": [
-        {
-          "binding": "SNAPSHOT_KV",
-          "id": "REPLACE_WITH_STAGING_KV_NAMESPACE_ID"
+          "binding": "GCP_PROXY_API_KEY",
+          "store_id": "bd7bc91a3e5f4111add4acf6cb4b8733",
+          "secret_name": "secrets-inventory-gcp-proxy-api-key"
         }
       ]
     }

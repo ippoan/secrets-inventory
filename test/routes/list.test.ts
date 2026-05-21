@@ -21,14 +21,9 @@ const baseEnv: Env = {
   CF_API_TOKEN: mockSecret("cf-tok"),
   GITHUB_ORG: "ippoan",
   GITHUB_PAT: mockSecret("gh-tok"),
-  GCP_PROJECT_ID: "p",
-  GCP_SA_KEY: mockSecret(
-    JSON.stringify({
-      type: "service_account",
-      client_email: "x@y.iam.gserviceaccount.com",
-      private_key: "k",
-    }),
-  ),
+  GCP_PROJECT_ID: "cloudsql-sv",
+  GCP_PROXY_URL: "https://secrets-inventory-gcp-stub.run.app",
+  GCP_PROXY_API_KEY: mockSecret("shared-secret-test"),
   SNAPSHOT_KV: {} as KVNamespace,
 };
 
@@ -93,11 +88,35 @@ describe("GET /api/github/secrets", () => {
   });
 });
 
+describe("GET /api/gcp/secrets", () => {
+  it("returns GCP secrets list shape via Cloud Run proxy", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json([
+        {
+          name: "projects/cloudsql-sv/secrets/STRIPE_API_KEY",
+          create_time: "2026-01-01T00:00:00Z",
+        },
+      ]),
+    );
+    const app = buildApp();
+    const res = await app.request("/api/gcp/secrets", {}, baseEnv);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      provider: string;
+      secrets: { name: string }[];
+    };
+    expect(body.provider).toBe("gcp");
+    expect(body.secrets[0]?.name).toBe("STRIPE_API_KEY");
+    expect(fetchSpy.mock.calls[0]?.[0]).toBe(
+      "https://secrets-inventory-gcp-stub.run.app/list-secrets",
+    );
+  });
+});
+
 describe("GET /api/all (partial success)", () => {
   it("returns per-provider results and surfaces errors without failing", async () => {
-    // GCP token + GCP list + CF list を成功させ、GitHub だけ 500 で落とす
-    const fetchSpy = vi.spyOn(globalThis, "fetch");
-    fetchSpy.mockImplementation(async (input) => {
+    // CF と GCP は成功、GitHub だけ 429 で落とす
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = typeof input === "string" ? input : input.toString();
       if (url.includes("api.cloudflare.com")) {
         return Response.json({
@@ -108,55 +127,16 @@ describe("GET /api/all (partial success)", () => {
       if (url.includes("api.github.com")) {
         return new Response("rate limited", { status: 429 });
       }
-      if (url.includes("oauth2.googleapis.com")) {
-        return Response.json({
-          access_token: "ya29.fake",
-          token_type: "Bearer",
-          expires_in: 3600,
-        });
-      }
-      if (url.includes("secretmanager.googleapis.com")) {
-        return Response.json({
-          secrets: [
-            { name: "projects/p/secrets/GCP1", createTime: "2026-01-01T00:00:00Z" },
-          ],
-        });
+      if (url.includes("secrets-inventory-gcp-stub.run.app")) {
+        return Response.json([
+          { name: "projects/cloudsql-sv/secrets/GCP1", create_time: "2026-01-01T00:00:00Z" },
+        ]);
       }
       return new Response("unexpected", { status: 500 });
     });
 
-    // GCP SA key の JWT 署名は実 RSA 鍵がないと作れないので、その経路は通らない
-    // ように `GCP_SA_KEY` を実 RSA SA key に差し替える。
-    const pair = (await crypto.subtle.generateKey(
-      {
-        name: "RSASSA-PKCS1-v1_5",
-        modulusLength: 2048,
-        publicExponent: new Uint8Array([1, 0, 1]),
-        hash: "SHA-256",
-      },
-      true,
-      ["sign", "verify"],
-    )) as CryptoKeyPair;
-    const pkcs8 = (await crypto.subtle.exportKey(
-      "pkcs8",
-      pair.privateKey,
-    )) as ArrayBuffer;
-    const b64 = btoa(String.fromCharCode(...new Uint8Array(pkcs8)));
-    const pem = `-----BEGIN PRIVATE KEY-----\n${b64.match(/.{1,64}/g)?.join("\n")}\n-----END PRIVATE KEY-----\n`;
-    const realKey = {
-      ...baseEnv,
-      GCP_SA_KEY: mockSecret(
-        JSON.stringify({
-          type: "service_account",
-          private_key_id: "kid",
-          private_key: pem,
-          client_email: "sa@p.iam.gserviceaccount.com",
-        }),
-      ),
-    };
-
     const app = buildApp();
-    const res = await app.request("/api/all", {}, realKey);
+    const res = await app.request("/api/all", {}, baseEnv);
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
       cloudflare: { secrets?: { name: string }[]; error?: string };

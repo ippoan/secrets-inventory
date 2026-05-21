@@ -2,10 +2,7 @@ import { Hono } from "hono";
 import type { Env, ProviderListError, ProviderListResult } from "../types";
 import { listCloudflareSecrets } from "../providers/cloudflare";
 import { listGitHubOrgSecrets } from "../providers/github";
-import {
-  listGcpSecrets,
-  parseServiceAccountKey,
-} from "../providers/gcp";
+import { listGcpSecrets } from "../providers/gcp";
 import type { CfAccessClaims } from "../middleware/cf-access";
 
 type AppVariables = { cfAccess: CfAccessClaims };
@@ -33,13 +30,12 @@ listRoutes.get("/github/secrets", async (c) => {
   return c.json({ provider: "github", secrets: result } satisfies ProviderListResult);
 });
 
-/** GET /api/gcp/secrets — GCP Secret Manager のメタデータ一覧 */
+/** GET /api/gcp/secrets — Cloud Run proxy (secrets-inventory-gcp) 経由で GCP Secret Manager メタデータを取得 */
 listRoutes.get("/gcp/secrets", async (c) => {
-  const saJson = await c.env.GCP_SA_KEY.get();
-  const key = parseServiceAccountKey(saJson);
+  const apiKey = await c.env.GCP_PROXY_API_KEY.get();
   const result = await listGcpSecrets({
-    serviceAccountKey: key,
-    projectId: c.env.GCP_PROJECT_ID,
+    proxyUrl: c.env.GCP_PROXY_URL,
+    apiKey,
   });
   return c.json({ provider: "gcp", secrets: result } satisfies ProviderListResult);
 });
@@ -63,11 +59,10 @@ listRoutes.get("/all", async (c) => {
       return listGitHubOrgSecrets({ token, org: c.env.GITHUB_ORG });
     })(),
     (async () => {
-      const saJson = await c.env.GCP_SA_KEY.get();
-      const key = parseServiceAccountKey(saJson);
+      const apiKey = await c.env.GCP_PROXY_API_KEY.get();
       return listGcpSecrets({
-        serviceAccountKey: key,
-        projectId: c.env.GCP_PROJECT_ID,
+        proxyUrl: c.env.GCP_PROXY_URL,
+        apiKey,
       });
     })(),
   ]);

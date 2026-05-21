@@ -40,9 +40,11 @@ export interface Env {
   GITHUB_ORG: string;
   GITHUB_PAT: SecretsStoreSecret;
 
-  // GCP Secret Manager (正)
+  // GCP Secret Manager (正) — Cloud Run proxy 経由でアクセス。
+  // proxy code は ippoan/secrets-inventory-gcp、SA key は発行しない (ADC)。
   GCP_PROJECT_ID: string;
-  GCP_SA_KEY: SecretsStoreSecret;
+  GCP_PROXY_URL: string;
+  GCP_PROXY_API_KEY: SecretsStoreSecret;
 
   // KV: PR3 で前回の name 一覧スナップショットを格納
   SNAPSHOT_KV: KVNamespace;
