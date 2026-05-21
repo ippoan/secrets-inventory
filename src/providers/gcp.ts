@@ -16,20 +16,26 @@ export interface GcpProxyContext {
 }
 
 /**
- * Cloud Run proxy (ippoan/secrets-inventory-gcp) が返す raw shape。
- * proxy 側 main.go の出力形式に合わせる。
+ * Cloud Run proxy (ippoan/secrets-inventory-gcp) `main.go` の `secretItem`
+ * と 1:1 対応。`name` は proxy 側で `projects/.../secrets/` prefix を剥がした
+ * 短縮名で来るが、Worker 側でも shortName() を idempotent にかけて防御する。
  */
 interface ProxyRawSecret {
   name: string;
-  create_time?: string;
+  created_at?: string;
   labels?: Record<string, string>;
+}
+
+/** proxy `main.go` の `listResponse` envelope。将来 pagination 拡張余地。 */
+interface ProxyListResponse {
+  secrets?: ProxyRawSecret[];
 }
 
 /**
  * GCP Secret Manager のメタデータ list を Cloud Run proxy 経由で取得する。
  *
  * Worker は GCP credentials を一切持たず、proxy への shared secret header
- * 認証のみで叩く。proxy 側で ADC 経由 (Cloud Run attached SA) に変換され、
+ * 認証のみで叩く。proxy 側で ADC (Cloud Run attached SA) に変換され、
  * Secret Manager へ。
  */
 export async function listGcpSecrets(
@@ -52,17 +58,17 @@ export async function listGcpSecrets(
     );
   }
 
-  const raw = (await res.json()) as ProxyRawSecret[];
-  return raw.map((s) => ({
+  const raw = (await res.json()) as ProxyListResponse;
+  return (raw.secrets ?? []).map((s) => ({
     name: shortName(s.name),
-    created_at: s.create_time ?? null,
+    created_at: s.created_at ?? null,
     extra: {
       labels: s.labels ?? {},
     },
   }));
 }
 
-/** `projects/p/secrets/foo` → `foo`。proxy 側でも parse 済みかもしれないが念のため。 */
+/** `projects/p/secrets/foo` → `foo`。proxy 側でも short 化済みだが防御的に再適用。 */
 export function shortName(fullName: string): string {
   const idx = fullName.lastIndexOf("/");
   return idx >= 0 ? fullName.slice(idx + 1) : fullName;

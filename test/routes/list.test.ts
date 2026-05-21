@@ -90,13 +90,17 @@ describe("GET /api/github/secrets", () => {
 
 describe("GET /api/gcp/secrets", () => {
   it("returns GCP secrets list shape via Cloud Run proxy", async () => {
+    // proxy main.go は {"secrets": [...]} envelope + 各 item は created_at
+    // ですでに short name (`projects/.../secrets/` prefix 剥離済み) で返す。
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      Response.json([
-        {
-          name: "projects/cloudsql-sv/secrets/STRIPE_API_KEY",
-          create_time: "2026-01-01T00:00:00Z",
-        },
-      ]),
+      Response.json({
+        secrets: [
+          {
+            name: "STRIPE_API_KEY",
+            created_at: "2026-01-01T00:00:00Z",
+          },
+        ],
+      }),
     );
     const app = buildApp();
     const res = await app.request("/api/gcp/secrets", {}, baseEnv);
@@ -128,9 +132,11 @@ describe("GET /api/all (partial success)", () => {
         return new Response("rate limited", { status: 429 });
       }
       if (url.includes("secrets-inventory-gcp-stub.run.app")) {
-        return Response.json([
-          { name: "projects/cloudsql-sv/secrets/GCP1", create_time: "2026-01-01T00:00:00Z" },
-        ]);
+        return Response.json({
+          secrets: [
+            { name: "GCP1", created_at: "2026-01-01T00:00:00Z" },
+          ],
+        });
       }
       return new Response("unexpected", { status: 500 });
     });

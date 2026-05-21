@@ -28,7 +28,7 @@ describe("listGcpSecrets (Cloud Run proxy)", () => {
 
   it("calls proxy /list-secrets with shared-secret header", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      Response.json([]),
+      Response.json({ secrets: [] }),
     );
     await listGcpSecrets(ctx);
     expect(fetchSpy).toHaveBeenCalledWith(
@@ -42,19 +42,21 @@ describe("listGcpSecrets (Cloud Run proxy)", () => {
     );
   });
 
-  it("maps proxy response to SecretMetadata with short name; no value leak", async () => {
+  it("maps proxy response to SecretMetadata; no value leak", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      Response.json([
-        {
-          name: "projects/cloudsql-sv/secrets/STRIPE_API_KEY",
-          create_time: "2026-01-01T00:00:00Z",
-          labels: { env: "prod" },
-        },
-        {
-          name: "projects/cloudsql-sv/secrets/OPENAI_API_KEY",
-          create_time: "2026-02-01T00:00:00Z",
-        },
-      ]),
+      Response.json({
+        secrets: [
+          {
+            name: "STRIPE_API_KEY",
+            created_at: "2026-01-01T00:00:00Z",
+            labels: { env: "prod" },
+          },
+          {
+            name: "OPENAI_API_KEY",
+            created_at: "2026-02-01T00:00:00Z",
+          },
+        ],
+      }),
     );
     const items = await listGcpSecrets(ctx);
     expect(items).toHaveLength(2);
@@ -66,8 +68,28 @@ describe("listGcpSecrets (Cloud Run proxy)", () => {
     }
   });
 
-  it("returns empty array when proxy returns []", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json([]));
+  it("applies shortName defensively even when proxy returns full path", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json({
+        secrets: [
+          { name: "projects/cloudsql-sv/secrets/LEGACY_FULL_PATH" },
+        ],
+      }),
+    );
+    const items = await listGcpSecrets(ctx);
+    expect(items[0]?.name).toBe("LEGACY_FULL_PATH");
+  });
+
+  it("returns empty array when proxy returns no secrets", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json({ secrets: [] }),
+    );
+    const items = await listGcpSecrets(ctx);
+    expect(items).toEqual([]);
+  });
+
+  it("treats missing `secrets` key as empty (defensive)", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json({}));
     const items = await listGcpSecrets(ctx);
     expect(items).toEqual([]);
   });
@@ -89,7 +111,7 @@ describe("listGcpSecrets (Cloud Run proxy)", () => {
 
   it("handles missing optional fields gracefully", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      Response.json([{ name: "projects/p/secrets/MIN" }]),
+      Response.json({ secrets: [{ name: "MIN" }] }),
     );
     const items = await listGcpSecrets(ctx);
     expect(items[0]?.name).toBe("MIN");
