@@ -6,81 +6,37 @@
   "observability": {
     "enabled": true
   },
-  // CF Access (Google OAuth) は Cloudflare Dashboard 側で Application を作成し、
-  // この Worker route を保護する。Team domain と AUD は Access > Application から取得。
-  // GitHub PAT / GCP SA 鍵 / Cloudflare API token はすべて Secrets Store binding 経由で
-  // 受け取り、平文の値は会話にも UI にも乗せない。
+  // staging を実運用 env として扱う。Secrets Store / KV namespace / CF Access
+  // Application はまだ未 provision なので、deploy が green になることを優先して
+  // bindings は一旦外してある。リソース作成後に follow-up PR で
+  // secrets_store_secrets / kv_namespaces を戻し、CF Access の team_domain と
+  // AUD も実値で埋める。
+  //
+  // 値が無い状態の挙動 (意図的):
+  //   GET /healthz       → 200 ok
+  //   GET /api/*         → CF Access middleware が JWT 検証で 401 を返す
+  //                        (=リソース未配置でも staging が観測可能)
   "vars": {
-    // CF Access
-    "CF_ACCESS_TEAM_DOMAIN": "REPLACE_WITH_TEAM_DOMAIN",
-    "CF_ACCESS_AUD": "REPLACE_WITH_APPLICATION_AUD",
-    // Cloudflare (突合対象)
-    "CF_ACCOUNT_ID": "REPLACE_WITH_ACCOUNT_ID",
-    "CF_STORE_ID": "REPLACE_WITH_STORE_ID",
-    // GitHub (突合対象)
-    "GITHUB_ORG": "REPLACE_WITH_ORG",
-    // GCP (正)
-    "GCP_PROJECT_ID": "REPLACE_WITH_PROJECT_ID"
+    "CF_ACCESS_TEAM_DOMAIN": "placeholder-team",
+    "CF_ACCESS_AUD": "placeholder-aud",
+    "CF_ACCOUNT_ID": "24b45709d060d957340180e995f0d373",
+    "CF_STORE_ID": "bd7bc91a3e5f4111add4acf6cb4b8733",
+    "GITHUB_ORG": "ippoan",
+    "GCP_PROJECT_ID": "placeholder-project"
   },
-  "secrets_store_secrets": [
-    {
-      "binding": "CF_API_TOKEN",
-      "store_id": "REPLACE_WITH_STORE_ID",
-      "secret_name": "SECRETS_INVENTORY_CF_API_TOKEN"
-    },
-    {
-      "binding": "GITHUB_PAT",
-      "store_id": "REPLACE_WITH_STORE_ID",
-      "secret_name": "SECRETS_INVENTORY_GITHUB_PAT"
-    },
-    {
-      "binding": "GCP_SA_KEY",
-      "store_id": "REPLACE_WITH_STORE_ID",
-      "secret_name": "SECRETS_INVENTORY_GCP_SA_KEY"
-    }
-  ],
-  "kv_namespaces": [
-    {
-      "binding": "SNAPSHOT_KV",
-      "id": "REPLACE_WITH_KV_NAMESPACE_ID"
-    }
-  ],
   "env": {
     "staging": {
       "name": "secrets-inventory-staging",
       "workers_dev": true,
       "observability": { "enabled": true },
       "vars": {
-        "CF_ACCESS_TEAM_DOMAIN": "REPLACE_WITH_TEAM_DOMAIN",
-        "CF_ACCESS_AUD": "REPLACE_WITH_STAGING_APPLICATION_AUD",
-        "CF_ACCOUNT_ID": "REPLACE_WITH_ACCOUNT_ID",
-        "CF_STORE_ID": "REPLACE_WITH_STAGING_STORE_ID",
-        "GITHUB_ORG": "REPLACE_WITH_ORG",
-        "GCP_PROJECT_ID": "REPLACE_WITH_STAGING_PROJECT_ID"
-      },
-      "secrets_store_secrets": [
-        {
-          "binding": "CF_API_TOKEN",
-          "store_id": "REPLACE_WITH_STAGING_STORE_ID",
-          "secret_name": "SECRETS_INVENTORY_CF_API_TOKEN"
-        },
-        {
-          "binding": "GITHUB_PAT",
-          "store_id": "REPLACE_WITH_STAGING_STORE_ID",
-          "secret_name": "SECRETS_INVENTORY_GITHUB_PAT"
-        },
-        {
-          "binding": "GCP_SA_KEY",
-          "store_id": "REPLACE_WITH_STAGING_STORE_ID",
-          "secret_name": "SECRETS_INVENTORY_GCP_SA_KEY"
-        }
-      ],
-      "kv_namespaces": [
-        {
-          "binding": "SNAPSHOT_KV",
-          "id": "REPLACE_WITH_STAGING_KV_NAMESPACE_ID"
-        }
-      ]
+        "CF_ACCESS_TEAM_DOMAIN": "placeholder-team",
+        "CF_ACCESS_AUD": "placeholder-aud",
+        "CF_ACCOUNT_ID": "24b45709d060d957340180e995f0d373",
+        "CF_STORE_ID": "bd7bc91a3e5f4111add4acf6cb4b8733",
+        "GITHUB_ORG": "ippoan",
+        "GCP_PROJECT_ID": "placeholder-project"
+      }
     }
   }
 }
