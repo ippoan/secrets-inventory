@@ -34,27 +34,42 @@ export class GcpUnavailableError extends Error {
 
 /**
  * 3 プロバイダーから現時点の secrets を取り、GCP を基準に突合し、KV の前回
- * snapshot との diff を返す。GitHub / CF の fetch 失敗は partial-success
- * (errors に reason を載せて該当列を `null` に) として扱う。
+ * snapshot との diff を返す。
+ *
+ * 各 provider の処理は **token 取得 + list 呼び出しをまとめて 1 つの promise**
+ * にして `Promise.allSettled` で並列化する。これによって:
+ *
+ * - Secrets Store の `.get()` が "Secrets Worker: Failed to fetch secret" で
+ *   throw しても、その provider だけが reject して errors に乗る (旧実装は
+ *   `Promise.all` で token 取得をまとめていたので 1 つでも throw すると全体が
+ *   落ちて Internal Server Error になっていた)
+ * - 同じ provider の token 取得失敗 / list API 失敗を区別せずに reason を
+ *   surface できる (どちらも操作者目線では「この provider が引けない」)
+ *
+ * GitHub / CF の partial-success 扱いは継続。GCP (source of truth) だけは
+ * GcpUnavailableError を throw して呼び出し元が 502 を返せるようにする。
  */
 export async function gatherInventory(
   env: Env,
   opts: GatherOptions = {},
 ): Promise<InventoryResult> {
-  const [gcpToken, ghToken, cfToken] = await Promise.all([
-    env.GCP_PROXY_API_KEY.get(),
-    env.GITHUB_PAT.get(),
-    env.CF_API_TOKEN.get(),
-  ]);
-
   const [gcpSettled, ghSettled, cfSettled] = await Promise.allSettled([
-    listGcpSecrets({ proxyUrl: env.GCP_PROXY_URL, apiKey: gcpToken }),
-    listGitHubOrgSecrets({ token: ghToken, org: env.GITHUB_ORG }),
-    listCloudflareSecrets({
-      token: cfToken,
-      accountId: env.CF_ACCOUNT_ID,
-      storeId: env.CF_STORE_ID,
-    }),
+    (async () => {
+      const apiKey = await env.GCP_PROXY_API_KEY.get();
+      return listGcpSecrets({ proxyUrl: env.GCP_PROXY_URL, apiKey });
+    })(),
+    (async () => {
+      const token = await env.GITHUB_PAT.get();
+      return listGitHubOrgSecrets({ token, org: env.GITHUB_ORG });
+    })(),
+    (async () => {
+      const token = await env.CF_API_TOKEN.get();
+      return listCloudflareSecrets({
+        token,
+        accountId: env.CF_ACCOUNT_ID,
+        storeId: env.CF_STORE_ID,
+      });
+    })(),
   ]);
 
   if (gcpSettled.status === "rejected") {

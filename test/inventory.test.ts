@@ -172,6 +172,59 @@ describe("gatherInventory — partial failures", () => {
       GcpUnavailableError,
     );
   });
+
+  // Real-world failure mode: SecretsStoreSecret.get() can throw
+  // "Secrets Worker: Failed to fetch secret" if the binding's secret name
+  // hasn't been provisioned in the store. Each provider's token fetch +
+  // list call は 1 つの promise にまとめてあるので、ここで throw しても
+  // その provider だけが reject して全体は止まらない。
+  function throwingSecret(reason: string): SecretsStoreSecret {
+    return {
+      get: async () => {
+        throw new Error(reason);
+      },
+    } as unknown as SecretsStoreSecret;
+  }
+
+  it("CF token .get() throws → in_cloudflare=null + errors.cloudflare (not 500)", async () => {
+    installFetchMock({
+      gcp: () =>
+        Response.json({
+          secrets: [{ name: "A", created_at: "2026-01-01T00:00:00Z" }],
+        }),
+    });
+    const env = makeEnv(makeKv().kv);
+    env.CF_API_TOKEN = throwingSecret("Secrets Worker: Failed to fetch secret");
+    const result = await gatherInventory(env);
+    expect(result.rows[0]?.in_cloudflare).toBeNull();
+    expect(result.errors.cloudflare).toMatch(/Secrets Worker/);
+    // GitHub の方は無事だったので errors.github は出ない
+    expect(result.errors.github).toBeUndefined();
+  });
+
+  it("GitHub token .get() throws → in_github=null + errors.github (not 500)", async () => {
+    installFetchMock({
+      gcp: () =>
+        Response.json({
+          secrets: [{ name: "A", created_at: "2026-01-01T00:00:00Z" }],
+        }),
+    });
+    const env = makeEnv(makeKv().kv);
+    env.GITHUB_PAT = throwingSecret("Secrets Worker: Failed to fetch secret");
+    const result = await gatherInventory(env);
+    expect(result.rows[0]?.in_github).toBeNull();
+    expect(result.errors.github).toMatch(/Secrets Worker/);
+  });
+
+  it("GCP token .get() throws → GcpUnavailableError (source of truth)", async () => {
+    const env = makeEnv(makeKv().kv);
+    env.GCP_PROXY_API_KEY = throwingSecret(
+      "Secrets Worker: Failed to fetch secret",
+    );
+    await expect(gatherInventory(env)).rejects.toBeInstanceOf(
+      GcpUnavailableError,
+    );
+  });
 });
 
 describe("gatherInventory — snapshot commit", () => {
