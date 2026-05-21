@@ -110,8 +110,8 @@ export function renderErrorPage(message: string): string {
 </head>
 <body>
   <header><h1>🔐 Secrets Inventory</h1></header>
-  <div class="err">${escapeHtml(message)}</div>
-  <p><a class="btn" href="/ui">↻ 再試行</a></p>
+  <div class="err"><pre style="margin:0;white-space:pre-wrap;word-break:break-word">${escapeHtml(message)}</pre></div>
+  <p><a class="btn" href="/">↻ 再試行</a></p>
 </body>
 </html>`;
 }
