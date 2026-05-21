@@ -14,9 +14,11 @@ import {
   type JWTVerifyGetKey,
 } from "jose";
 
-const TEAM = "myteam";
+// teamDomain は wrangler.jsonc の CF_ACCESS_TEAM_DOMAIN と同じ **完全ドメイン**
+// 形式 (<team>.cloudflareaccess.com) を使う。CF Access 公式 docs と揃えた状態。
+const TEAM = "myteam.cloudflareaccess.com";
 const AUD = "abcdef0123456789";
-const ISSUER = `https://${TEAM}.cloudflareaccess.com`;
+const ISSUER = `https://${TEAM}`;
 const KID = "test-kid";
 
 let privateKey: CryptoKey;
