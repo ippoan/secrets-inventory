@@ -6,24 +6,41 @@
   "observability": {
     "enabled": true
   },
-  // staging を実運用 env として扱う。Secrets Store / KV namespace / CF Access
-  // Application はまだ未 provision なので、deploy が green になることを優先して
-  // bindings は一旦外してある。リソース作成後に follow-up PR で
-  // secrets_store_secrets / kv_namespaces を戻し、CF Access の team_domain と
-  // AUD も実値で埋める。
+  // staging を実運用 env として扱う。CF Access Application は別途 dashboard で
+  // 作成し、`CF_ACCESS_TEAM_DOMAIN` / `CF_ACCESS_AUD` を実値に置換する。
   //
-  // 値が無い状態の挙動 (意図的):
-  //   GET /healthz       → 200 ok
-  //   GET /api/*         → CF Access middleware が JWT 検証で 401 を返す
-  //                        (=リソース未配置でも staging が観測可能)
+  // GCP は Cloud Run proxy (ippoan/secrets-inventory-gcp) 経由でアクセス。
+  // proxy URL は Cloud Run deploy 完了時に確定するので、それまで placeholder。
+  //
+  // Secrets Store / KV namespace は未 provision 部分があるため、現時点では
+  // GCP_PROXY_API_KEY (shared secret) と GitHub PAT / CF API token の 3 binding
+  // のみ宣言。KV namespace は PR3 (snapshot diff) で追加する。
   "vars": {
     "CF_ACCESS_TEAM_DOMAIN": "placeholder-team",
     "CF_ACCESS_AUD": "placeholder-aud",
     "CF_ACCOUNT_ID": "24b45709d060d957340180e995f0d373",
     "CF_STORE_ID": "bd7bc91a3e5f4111add4acf6cb4b8733",
     "GITHUB_ORG": "ippoan",
-    "GCP_PROJECT_ID": "placeholder-project"
+    "GCP_PROJECT_ID": "cloudsql-sv",
+    "GCP_PROXY_URL": "https://secrets-inventory-gcp-placeholder.run.app"
   },
+  "secrets_store_secrets": [
+    {
+      "binding": "CF_API_TOKEN",
+      "store_id": "bd7bc91a3e5f4111add4acf6cb4b8733",
+      "secret_name": "secrets-inventory-secrets-store-read"
+    },
+    {
+      "binding": "GITHUB_PAT",
+      "store_id": "bd7bc91a3e5f4111add4acf6cb4b8733",
+      "secret_name": "gh-secrets-inventory-org-secrets-read"
+    },
+    {
+      "binding": "GCP_PROXY_API_KEY",
+      "store_id": "bd7bc91a3e5f4111add4acf6cb4b8733",
+      "secret_name": "secrets-inventory-gcp-proxy-api-key"
+    }
+  ],
   "env": {
     "staging": {
       "name": "secrets-inventory-staging",
@@ -35,8 +52,26 @@
         "CF_ACCOUNT_ID": "24b45709d060d957340180e995f0d373",
         "CF_STORE_ID": "bd7bc91a3e5f4111add4acf6cb4b8733",
         "GITHUB_ORG": "ippoan",
-        "GCP_PROJECT_ID": "placeholder-project"
-      }
+        "GCP_PROJECT_ID": "cloudsql-sv",
+        "GCP_PROXY_URL": "https://secrets-inventory-gcp-placeholder.run.app"
+      },
+      "secrets_store_secrets": [
+        {
+          "binding": "CF_API_TOKEN",
+          "store_id": "bd7bc91a3e5f4111add4acf6cb4b8733",
+          "secret_name": "secrets-inventory-secrets-store-read"
+        },
+        {
+          "binding": "GITHUB_PAT",
+          "store_id": "bd7bc91a3e5f4111add4acf6cb4b8733",
+          "secret_name": "gh-secrets-inventory-org-secrets-read"
+        },
+        {
+          "binding": "GCP_PROXY_API_KEY",
+          "store_id": "bd7bc91a3e5f4111add4acf6cb4b8733",
+          "secret_name": "secrets-inventory-gcp-proxy-api-key"
+        }
+      ]
     }
   }
 }
