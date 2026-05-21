@@ -11,7 +11,7 @@
   // 作成し、`CF_ACCESS_TEAM_DOMAIN` / `CF_ACCESS_AUD` を実値に置換する。
   //
   // GCP は Cloud Run proxy (ippoan/secrets-inventory-gcp) 経由でアクセス。
-  // proxy URL は Cloud Run deploy 完了時に確定するので、それまで placeholder。
+  // `GCP_PROXY_URL` は Cloud Run staging service の実 URL に確定済み。
   //
   // Secrets Store / KV namespace は未 provision 部分があるため、現時点では
   // GCP_PROXY_API_KEY (shared secret) と GitHub PAT / CF API token の 3 binding
@@ -23,7 +23,7 @@
     "CF_STORE_ID": "bd7bc91a3e5f4111add4acf6cb4b8733",
     "GITHUB_ORG": "ippoan",
     "GCP_PROJECT_ID": "cloudsql-sv",
-    "GCP_PROXY_URL": "https://secrets-inventory-gcp-placeholder.run.app"
+    "GCP_PROXY_URL": "https://secrets-inventory-gcp-staging-566bls5vfq-an.a.run.app"
   },
   "secrets_store_secrets": [
     {
@@ -55,7 +55,7 @@
         "CF_STORE_ID": "bd7bc91a3e5f4111add4acf6cb4b8733",
         "GITHUB_ORG": "ippoan",
         "GCP_PROJECT_ID": "cloudsql-sv",
-        "GCP_PROXY_URL": "https://secrets-inventory-gcp-placeholder.run.app"
+        "GCP_PROXY_URL": "https://secrets-inventory-gcp-staging-566bls5vfq-an.a.run.app"
       },
       "secrets_store_secrets": [
         {
