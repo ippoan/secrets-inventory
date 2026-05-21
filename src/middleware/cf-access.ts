@@ -21,15 +21,17 @@ interface CfAccessConfig {
  * teamDomain ごとに JWKS resolver をキャッシュする。
  * Worker isolate のライフタイム中だけ持つので、新しい team domain に切り替わって
  * もメモリリークにはならない。
+ *
+ * teamDomain は 完全ドメイン (`<team>.cloudflareaccess.com`) 形式を要求する。
+ * 変数名 `CF_ACCESS_TEAM_DOMAIN` と CF 公式ドキュメント ("team domain =
+ * `<team>.cloudflareaccess.com`") に揃えている。
  */
 const jwksCache = new Map<string, JWTVerifyGetKey>();
 
 function getJwks(teamDomain: string): JWTVerifyGetKey {
   let jwks = jwksCache.get(teamDomain);
   if (!jwks) {
-    const url = new URL(
-      `https://${teamDomain}.cloudflareaccess.com/cdn-cgi/access/certs`,
-    );
+    const url = new URL(`https://${teamDomain}/cdn-cgi/access/certs`);
     jwks = createRemoteJWKSet(url);
     jwksCache.set(teamDomain, jwks);
   }
@@ -97,6 +99,8 @@ export function cfAccessMiddleware(
 /**
  * 指定 JWKS resolver で JWT を検証し payload を返す。`createRemoteJWKSet`
  * (本番) でも `createLocalJWKSet` (テスト) でも同じシグネチャで使える。
+ *
+ * teamDomain は 完全ドメイン (`<team>.cloudflareaccess.com`) を指定する。
  */
 export async function verifyCfAccessJwtWithJwks(
   token: string,
@@ -105,7 +109,7 @@ export async function verifyCfAccessJwtWithJwks(
 ): Promise<CfAccessClaims> {
   const { payload } = await jwtVerify(token, jwks, {
     audience: config.audience,
-    issuer: `https://${config.teamDomain}.cloudflareaccess.com`,
+    issuer: `https://${config.teamDomain}`,
   });
   return payload as CfAccessClaims;
 }
