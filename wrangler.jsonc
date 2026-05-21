@@ -34,7 +34,7 @@
     {
       "binding": "CF_API_TOKEN",
       "store_id": "bd7bc91a3e5f4111add4acf6cb4b8733",
-      "secret_name": "secrets-inventory-secrets-store-read"
+      "secret_name": "cf-secrets-inventory-secrets-store-read"
     },
     {
       "binding": "GITHUB_PAT",
@@ -72,7 +72,7 @@
         {
           "binding": "CF_API_TOKEN",
           "store_id": "bd7bc91a3e5f4111add4acf6cb4b8733",
-          "secret_name": "secrets-inventory-secrets-store-read"
+          "secret_name": "cf-secrets-inventory-secrets-store-read"
         },
         {
           "binding": "GITHUB_PAT",
