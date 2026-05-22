@@ -11,6 +11,13 @@ permissions:
   contents: write
   pull-requests: write
   packages: read
+  # frontend-ci.yml の nested `secret-verify` job が secret-verify-gcp.yml
+  # を call し、その verify job が WIF OIDC token を mint するために
+  # id-token: write を要求する。`if:` で skip される run でも reusable
+  # parse 時に caller permissions check が走るため、declare していないと
+  # workflow 全体が startup_failure になる (ci-workflows#39 merge 後の確認
+  # 結果、詳細は ci-workflows CLAUDE.md "startup_failure" troubleshoot)。
+  id-token: write
 
 jobs:
   ci:
