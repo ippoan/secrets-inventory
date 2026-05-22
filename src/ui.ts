@@ -138,17 +138,49 @@ function renderRow(row: InventoryRow, projectId: string): string {
   const newBadge = row.is_new_since_snapshot
     ? ` <span class="badge badge-added">new</span>`
     : "";
+  const labelBadge = renderLabelBadge(extractLabels(row.gcp));
   return `<tr${newClass}>
     <td class="name-cell">
       <a class="name-link" href="${escapeAttr(gcpConsoleSecretUrl(projectId, row.name))}" target="_blank" rel="noopener">
         ${escapeHtml(row.name)}
-      </a>${newBadge}
+      </a>${newBadge}${labelBadge}
     </td>
     <td>${markPresentCell(row.gcp)}</td>
     <td>${markCell(row.in_github, row.github, row.gcp)}</td>
     <td>${markCell(row.in_cloudflare, row.cloudflare, row.gcp)}</td>
     <td class="ts">${row.gcp.created_at ? escapeHtml(row.gcp.created_at) : '<span class="muted">—</span>'}</td>
   </tr>`;
+}
+
+/**
+ * GCP secret の labels (`extra.labels: Record<string,string>`) を取り出す。
+ * provider が extra を持たない / labels キーが無い場合は空オブジェクト。
+ */
+function extractLabels(meta: SecretMetadata): Record<string, string> {
+  const raw = meta.extra?.labels;
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+    return raw as Record<string, string>;
+  }
+  return {};
+}
+
+/**
+ * 行ごとの label 数 badge。可視部分には数だけ出して、tooltip で
+ * `key=value` ペアを 1 行ずつ表示する。
+ *
+ * - labels が 0 件 → muted の `0` badge を出す (= GCP 側で labels 未設定の
+ *   secret を可視化したい、隠してしまうと「label 0」と「badge が消えてる」
+ *   の区別が付かない)
+ * - 1 件以上 → ハイライト色 + tooltip
+ */
+function renderLabelBadge(labels: Record<string, string>): string {
+  const entries = Object.entries(labels).sort(([a], [b]) => a.localeCompare(b));
+  const n = entries.length;
+  if (n === 0) {
+    return ` <span class="label-count label-count-zero" title="no labels">0 labels</span>`;
+  }
+  const tooltip = entries.map(([k, v]) => `${k}=${v}`).join("\n");
+  return ` <span class="label-count" title="${escapeAttr(tooltip)}">${n} label${n === 1 ? "" : "s"}</span>`;
 }
 
 /**
@@ -310,7 +342,7 @@ export function escapeHtml(s: string): string {
     .replace(/'/g, "&#39;");
 }
 
-/** 属性値専用 (escapeHtml と現状同じ挙動)。意図を明示するためのエイリアス。 */
+/** 属性値専用 (escapeHtml と現状同じ挻動)。意図を明示するためのエイリアス。 */
 export function escapeAttr(s: string): string {
   return escapeHtml(s);
 }
@@ -351,6 +383,23 @@ const PAGE_STYLES = `
   .badge-added   { background: #1f3a26; color: #56d364; }
   .badge-removed { background: #3a1f1f; color: #ff7b72; }
   .badge-ok      { background: #1f2937; color: #8b949e; }
+  /* Per-secret label count chip in the name cell. Tooltip shows the
+     full key=value list (newline-separated). cursor:help is the
+     standard browser hint that there is a tooltip on hover. */
+  .label-count {
+    display: inline-block;
+    padding: 1px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 600;
+    margin-left: 6px;
+    background: #1c2a3a;
+    color: #79c0ff;
+    border: 1px solid #30363d;
+    cursor: help;
+    white-space: nowrap;
+  }
+  .label-count-zero { background: #1f2937; color: #8b949e; }
   .controls {
     margin-bottom: 16px;
     display: flex;

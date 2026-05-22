@@ -302,6 +302,117 @@ describe("renderInventoryPage", () => {
     expect(html).toMatch(/GitHub <span class="muted">\(\?\)<\/span>/);
   });
 
+  it("shows per-secret label count badge with the labels in the tooltip", () => {
+    const html = renderInventoryPage(
+      baseResult({
+        rows: [
+          {
+            name: "STRIPE_API_KEY",
+            gcp: {
+              name: "STRIPE_API_KEY",
+              extra: {
+                labels: {
+                  env: "production",
+                  "used-by-ippoan-secrets-inventory-gcp": "active",
+                },
+              },
+            },
+            in_github: true,
+            in_cloudflare: true,
+            github: null,
+            cloudflare: null,
+            is_new_since_snapshot: false,
+          },
+        ],
+      }),
+    );
+    // 数だけが可視: "2 labels"
+    expect(html).toMatch(/class="label-count"[^>]*>2 labels</);
+    // tooltip に key=value が両方入っている (sort 順 = key alphabetical)
+    expect(html).toMatch(/title="env=production\nused-by-ippoan-secrets-inventory-gcp=active"/);
+  });
+
+  it("shows '0 labels' badge for secrets without any labels", () => {
+    const html = renderInventoryPage(
+      baseResult({
+        rows: [
+          {
+            name: "NO_LABELS",
+            gcp: { name: "NO_LABELS", extra: { labels: {} } },
+            in_github: true,
+            in_cloudflare: true,
+            github: null,
+            cloudflare: null,
+            is_new_since_snapshot: false,
+          },
+        ],
+      }),
+    );
+    expect(html).toMatch(/class="label-count label-count-zero"[^>]*>0 labels</);
+  });
+
+  it("treats missing extra.labels as zero labels (no extra field at all)", () => {
+    const html = renderInventoryPage(
+      baseResult({
+        rows: [
+          {
+            name: "NO_EXTRA",
+            gcp: { name: "NO_EXTRA" },
+            in_github: true,
+            in_cloudflare: true,
+            github: null,
+            cloudflare: null,
+            is_new_since_snapshot: false,
+          },
+        ],
+      }),
+    );
+    expect(html).toMatch(/class="label-count label-count-zero"[^>]*>0 labels</);
+  });
+
+  it("escapes label keys/values in the tooltip (defensive)", () => {
+    const html = renderInventoryPage(
+      baseResult({
+        rows: [
+          {
+            name: "EVIL",
+            gcp: {
+              name: "EVIL",
+              extra: { labels: { "<x>": '"y"' } },
+            },
+            in_github: true,
+            in_cloudflare: true,
+            github: null,
+            cloudflare: null,
+            is_new_since_snapshot: false,
+          },
+        ],
+      }),
+    );
+    expect(html).toContain("&lt;x&gt;=&quot;y&quot;");
+    expect(html).not.toMatch(/title="<x>="y""/);
+  });
+
+  it("uses singular 'label' (not 'labels') when count is 1", () => {
+    const html = renderInventoryPage(
+      baseResult({
+        rows: [
+          {
+            name: "ONE",
+            gcp: { name: "ONE", extra: { labels: { env: "prod" } } },
+            in_github: true,
+            in_cloudflare: true,
+            github: null,
+            cloudflare: null,
+            is_new_since_snapshot: false,
+          },
+        ],
+      }),
+    );
+    expect(html).toMatch(/class="label-count"[^>]*>1 label</);
+    expect(html).not.toMatch(/class="label-count"[^>]*>1 labels</);
+  });
+
   it("links secret names to per-secret GCP console URL", () => {
     const html = renderInventoryPage(
       baseResult({
