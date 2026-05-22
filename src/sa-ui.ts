@@ -75,11 +75,12 @@ export function renderSaInventoryPage(
         <th>roles</th>
         <th>user keys</th>
         <th>最古 key</th>
+        <th>最終認証</th>
         <th>fetched</th>
       </tr>
     </thead>
     <tbody>
-      ${rowsHtml || `<tr><td colspan="7" class="muted">該当 SA なし</td></tr>`}
+      ${rowsHtml || `<tr><td colspan="8" class="muted">該当 SA なし</td></tr>`}
     </tbody>
   </table>
 
@@ -132,6 +133,7 @@ function renderRow(row: SaInventoryRow, projectId: string): string {
     audit.oldest_user_key_age_days === null
       ? `<span class="muted">—</span>`
       : `<span class="${audit.flags.includes("key-old") ? "warn" : ""}">${audit.oldest_user_key_age_days} 日</span>`;
+  const lastAuthHtml = renderLastAuth(sa.last_authenticated_at);
 
   const tooltipParts: string[] = [];
   if (sa.display_name) tooltipParts.push(`name: ${sa.display_name}`);
@@ -150,8 +152,34 @@ function renderRow(row: SaInventoryRow, projectId: string): string {
     <td>${rolesHtml}</td>
     <td>${audit.user_managed_key_count}</td>
     <td class="ts">${oldestKey}</td>
+    <td class="ts">${lastAuthHtml}</td>
     <td class="muted">${sa.disabled ? "disabled" : ""}</td>
   </tr>`;
+}
+
+/**
+ * 最終認証時刻を "N 日前" 表示で返す。`undefined` (proxy が空文字を返した、
+ * Policy Analyzer 未付与、観測期間中認証なし) は "—" + tooltip で説明、
+ * >90 日は `warn` クラスで強調。
+ *
+ * `now()` ではなく `Date.now()` を直接呼ぶ test がぶつかると flaky になるが、
+ * 単位が日なので 1 ms の誤差で不安定にはならない。
+ */
+export function renderLastAuth(rfc3339: string | undefined): string {
+  if (!rfc3339) {
+    return `<span class="muted" title="Policy Analyzer の観測期間中に認証無し / API 未有効 / 権限不足">—</span>`;
+  }
+  const ts = Date.parse(rfc3339);
+  if (Number.isNaN(ts)) {
+    return `<span class="muted" title="${escapeAttr(rfc3339)}">?</span>`;
+  }
+  const days = Math.floor((Date.now() - ts) / (1000 * 60 * 60 * 24));
+  if (days < 0) {
+    // 将来の timestamp (clock drift / API バグ) は そのまま 0 日前表示。
+    return `<span title="${escapeAttr(rfc3339)}">0 日前</span>`;
+  }
+  const cls = days > 90 ? "warn" : "";
+  return `<span class="${cls}" title="${escapeAttr(rfc3339)}">${days} 日前</span>`;
 }
 
 function renderRoles(roles: string[]): string {
