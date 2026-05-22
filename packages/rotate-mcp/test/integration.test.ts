@@ -1,5 +1,4 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { Hono } from "hono";
 import {
   SignJWT,
   generateKeyPair,
@@ -7,19 +6,13 @@ import {
   createLocalJWKSet,
   type JWTVerifyGetKey,
 } from "jose";
-import type { Env, AppVariables, SecretsStoreSecret } from "../src/types";
-import { cfAccessMiddleware } from "../src/middleware/cf-access";
-import { bearerMiddleware } from "../src/middleware/bearer";
-import {
-  streamableHttpPost,
-  legacySseGet,
-  legacySsePost,
-} from "../src/mcp/transport";
+import type { Env, SecretsStoreSecret } from "../src/types";
 import { _resetJwksCacheForTests } from "../src/middleware/cf-access";
+import { createApp } from "../src/index";
+import defaultApp from "../src/index";
 
-// CF Access の jwksOverride を差し込んだ end-to-end の組み立てテスト。
-// `src/index.ts` の app そのものは createRemoteJWKSet を呼ぶため worker runtime
-// 外では使えない。ここでは同じ middleware と route 構成を test 内で再現する。
+// CF Access の jwksOverride / Bearer override を渡して remote 依存を bypass し、
+// 本番 entry である `src/index.ts` の `createApp` factory を直接 test する。
 
 const TEAM = "myteam.cloudflareaccess.com";
 const AUD = "abcdef0123456789";
@@ -65,22 +58,7 @@ async function signJwt(): Promise<string> {
 }
 
 function buildApp() {
-  const app = new Hono<{ Bindings: Env; Variables: AppVariables }>();
-  app.get("/health", (c) =>
-    c.json({
-      ok: true,
-      name: c.env.MCP_SERVER_NAME,
-      version: c.env.MCP_SERVER_VERSION,
-      protocol: c.env.MCP_PROTOCOL_VERSION,
-    }),
-  );
-  app.use("/mcp/*", cfAccessMiddleware(jwks));
-  app.use("/mcp/*", bearerMiddleware());
-  app.post("/mcp", streamableHttpPost);
-  app.get("/mcp/sse", legacySseGet);
-  app.post("/mcp/sse/message", legacySsePost);
-  app.all("/mcp/*", (c) => c.json({ error: "not found" }, 404));
-  return app;
+  return createApp({ jwksResolver: () => jwks });
 }
 
 describe("/health", () => {
@@ -323,5 +301,39 @@ describe("unknown /mcp/* path", () => {
       env,
     );
     expect(res.status).toBe(404);
+  });
+});
+
+describe("default export", () => {
+  it("is the production createApp() instance (jwks fetched remotely on demand)", async () => {
+    // import 時点では createRemoteJWKSet を実際に呼ばないので副作用無し。
+    // /health は 認証 middleware の手前にあるため remote fetch を起動しない。
+    const res = await defaultApp.request("/health", {}, env);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean };
+    expect(body.ok).toBe(true);
+  });
+});
+
+describe("createApp with bearer override", () => {
+  it("uses options.expectedBearer instead of env binding", async () => {
+    const app = createApp({
+      jwksResolver: () => jwks,
+      expectedBearer: mockSecret("override-bearer"),
+    });
+    const jwt = await signJwt();
+    const res = await app.request(
+      "/mcp",
+      {
+        method: "POST",
+        headers: {
+          "Cf-Access-Jwt-Assertion": jwt,
+          Authorization: "Bearer override-bearer",
+        },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "ping" }),
+      },
+      env,
+    );
+    expect(res.status).toBe(200);
   });
 });

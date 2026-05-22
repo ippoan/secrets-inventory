@@ -26,9 +26,9 @@ async function constantTimeEquals(a: string, b: string): Promise<boolean> {
   const hashB = new Uint8Array(
     await crypto.subtle.digest("SHA-256", enc.encode(b)),
   );
-  let diff = hashA.length === hashB.length ? 0 : 1;
-  const len = Math.min(hashA.length, hashB.length);
-  for (let i = 0; i < len; i++) {
+  // SHA-256 出力は常に 32 byte 固定なので length 比較は不要 (dead branch)。
+  let diff = 0;
+  for (let i = 0; i < hashA.length; i++) {
     diff |= hashA[i]! ^ hashB[i]!;
   }
   return diff === 0;
@@ -76,7 +76,7 @@ export function bearerMiddleware(
     try {
       expected = await binding.get();
     } catch (err) {
-      const message = err instanceof Error ? err.message : "unknown error";
+      const message = err instanceof Error ? err.message : String(err);
       return c.json(
         { error: `Bearer secret read failed: ${message}` },
         503,

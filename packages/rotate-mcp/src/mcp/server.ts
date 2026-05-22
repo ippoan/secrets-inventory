@@ -67,7 +67,7 @@ export async function handleMcpRequest(
         );
     }
   } catch (err) {
-    const message = err instanceof Error ? err.message : "internal error";
+    const message = err instanceof Error ? err.message : String(err);
     return makeError(id, JSON_RPC_INTERNAL_ERROR, message);
   }
 }

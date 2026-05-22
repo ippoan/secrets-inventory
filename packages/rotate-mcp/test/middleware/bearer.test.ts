@@ -75,7 +75,7 @@ describe("bearerMiddleware", () => {
     expect(res.status).toBe(503);
   });
 
-  it("returns 503 when binding.get throws", async () => {
+  it("returns 503 when binding.get throws (Error)", async () => {
     const { app, env } = buildApp({
       ROTATE_MCP_BEARER: {
         get: async () => {
@@ -90,7 +90,25 @@ describe("bearerMiddleware", () => {
     );
     expect(res.status).toBe(503);
     const body = (await res.json()) as { error: string };
-    expect(body.error).toMatch(/Bearer secret read failed/);
+    expect(body.error).toMatch(/Bearer secret read failed: binding read fail/);
+  });
+
+  it("returns 503 when binding.get throws (non-Error)", async () => {
+    const { app, env } = buildApp({
+      ROTATE_MCP_BEARER: {
+        get: async () => {
+          throw "non-error-string";
+        },
+      },
+    });
+    const res = await app.request(
+      "/mcp/ok",
+      { headers: { Authorization: "Bearer x" } },
+      env,
+    );
+    expect(res.status).toBe(503);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toMatch(/Bearer secret read failed: non-error-string/);
   });
 
   it("returns 503 when bearer is empty string in store", async () => {

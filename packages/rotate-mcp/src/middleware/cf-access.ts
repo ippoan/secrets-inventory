@@ -20,9 +20,20 @@ interface CfAccessConfig {
   audience: string;
 }
 
+/**
+ * teamDomain → JWKS key resolver を返す factory。test では mock resolver を
+ * 注入できるよう、middleware は resolver 自身を引数で受け取る (middleware 内に
+ * fallback 分岐を残さない)。
+ */
+export type JwksResolver = (teamDomain: string) => JWTVerifyGetKey;
+
 const jwksCache = new Map<string, JWTVerifyGetKey>();
 
-function getJwks(teamDomain: string): JWTVerifyGetKey {
+/**
+ * 本番用 resolver。teamDomain ごとに `createRemoteJWKSet` を 1 度だけ生成して
+ * Worker isolate のライフタイム中だけキャッシュする。
+ */
+export const defaultJwksResolver: JwksResolver = (teamDomain) => {
   let jwks = jwksCache.get(teamDomain);
   if (!jwks) {
     const url = new URL(`https://${teamDomain}/cdn-cgi/access/certs`);
@@ -30,10 +41,17 @@ function getJwks(teamDomain: string): JWTVerifyGetKey {
     jwksCache.set(teamDomain, jwks);
   }
   return jwks;
-}
+};
 
+/**
+ * `Cf-Access-Jwt-Assertion` ヘッダーを検証し、`c.set("cfAccess", claims)` に
+ * デコード済み claims を載せる Hono middleware。
+ *
+ * 本番では `defaultJwksResolver` を渡し、test では closure で localJWKSet を
+ * 返す resolver を渡す。
+ */
 export function cfAccessMiddleware(
-  jwksOverride?: JWTVerifyGetKey,
+  jwksResolver: JwksResolver,
 ): MiddlewareHandler<{
   Bindings: {
     CF_ACCESS_TEAM_DOMAIN: string;
@@ -58,14 +76,14 @@ export function cfAccessMiddleware(
     }
 
     try {
-      const jwks = jwksOverride ?? getJwks(teamDomain);
+      const jwks = jwksResolver(teamDomain);
       const claims = await verifyCfAccessJwtWithJwks(token, jwks, {
         teamDomain,
         audience,
       });
       c.set("cfAccess", claims);
     } catch (err) {
-      const message = err instanceof Error ? err.message : "invalid jwt";
+      const message = err instanceof Error ? err.message : String(err);
       return c.json(
         { error: `CF Access JWT verification failed: ${message}` },
         401,
@@ -86,10 +104,6 @@ export async function verifyCfAccessJwtWithJwks(
     issuer: `https://${config.teamDomain}`,
   });
   return payload as CfAccessClaims;
-}
-
-export function defaultJwksResolver(teamDomain: string): JWTVerifyGetKey {
-  return getJwks(teamDomain);
 }
 
 export function _resetJwksCacheForTests(): void {

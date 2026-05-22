@@ -30,7 +30,7 @@ export async function streamableHttpPost(c: AppContext): Promise<Response> {
   try {
     body = await c.req.json<JsonRpcRequest>();
   } catch (err) {
-    const message = err instanceof Error ? err.message : "invalid json";
+    const message = err instanceof Error ? err.message : String(err);
     return c.json(makeError(null, JSON_RPC_PARSE_ERROR, message), 400);
   }
 
@@ -84,7 +84,7 @@ export async function legacySsePost(c: AppContext): Promise<Response> {
   try {
     body = await c.req.json<JsonRpcRequest>();
   } catch (err) {
-    const message = err instanceof Error ? err.message : "invalid json";
+    const message = err instanceof Error ? err.message : String(err);
     return c.json(makeError(null, JSON_RPC_PARSE_ERROR, message), 400);
   }
   const response = await handleMcpRequest(body, c.env);

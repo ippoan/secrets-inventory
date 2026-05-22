@@ -244,7 +244,7 @@ describe("handleMcpRequest tools/call rotate_secret", () => {
 });
 
 describe("handleMcpRequest exception path", () => {
-  it("wraps unexpected errors into -32603", async () => {
+  it("wraps unexpected Error into -32603", async () => {
     const badEnv = new Proxy(env, {
       get(target, prop) {
         if (prop === "MCP_PROTOCOL_VERSION") {
@@ -260,5 +260,23 @@ describe("handleMcpRequest exception path", () => {
     if (res === null || !("error" in res)) throw new Error("expected error");
     expect(res.error.code).toBe(-32603);
     expect(res.error.message).toBe("explode");
+  });
+
+  it("wraps non-Error throw into -32603 via String(err)", async () => {
+    const badEnv = new Proxy(env, {
+      get(target, prop) {
+        if (prop === "MCP_PROTOCOL_VERSION") {
+          throw "non-error-string";
+        }
+        return target[prop as keyof Env];
+      },
+    }) as Env;
+    const res = await handleMcpRequest(
+      { jsonrpc: "2.0", id: 15, method: "initialize" },
+      badEnv,
+    );
+    if (res === null || !("error" in res)) throw new Error("expected error");
+    expect(res.error.code).toBe(-32603);
+    expect(res.error.message).toBe("non-error-string");
   });
 });
