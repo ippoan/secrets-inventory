@@ -23,7 +23,7 @@ const FLAG_TOOLTIP: Record<SaFlag, string> = {
   "no-role": "project IAM policy に role binding が 1 件もない",
   disabled: "SA が disabled 状態 (削除候補)",
   "key-old": "user-managed key の最古 valid_after が 180 日超",
-  "default-sa": "GCE / App Engine の自動生成 default SA (disable 推奨)",
+  "default-sa": "GCE / App Engine の自動生成 default SA。削除すると依存サービスが壊れるため削除不可。editor role 等の過剰権限の縮小のみ可。",
   "key-anomaly": "user-managed key 数 ≥ 3 (rotation 中以外で多すぎ)",
   "stale-auth": "Policy Analyzer が観測した最終認証が 90 日超過 (= 真に未使用の可能性)",
   "has-user-key": "USER_MANAGED key を 1 個以上保持 = WIF / ADC へキーレス移行候補",
@@ -124,8 +124,24 @@ function renderSummary(
   </section>`;
 }
 
+/**
+ * GCP が自動生成し、project の生存期間中は削除しても再生成される / 削除すると
+ * 依存サービス (Cloud Run / App Engine / Cloud Build) が壊れる default SA か。
+ * email の suffix で判定する。
+ *
+ * - `*@appspot.gserviceaccount.com` … App Engine default SA
+ * - `*@developer.gserviceaccount.com` … Compute Engine default SA (project number prefix)
+ */
+export function isUndeletableDefaultSa(email: string): boolean {
+  return (
+    email.endsWith("@appspot.gserviceaccount.com") ||
+    email.endsWith("@developer.gserviceaccount.com")
+  );
+}
+
 function renderRow(row: SaInventoryRow, projectId: string): string {
   const { sa, audit } = row;
+  const undeletable = isUndeletableDefaultSa(sa.email);
   const flagsHtml = audit.flags
     .map(
       (f) =>
@@ -145,12 +161,16 @@ function renderRow(row: SaInventoryRow, projectId: string): string {
   if (sa.unique_id) tooltipParts.push(`uid: ${sa.unique_id}`);
   const emailTooltip = tooltipParts.join(" / ");
 
-  return `<tr class="status-${audit.status}">
+  const undeletableBadge = undeletable
+    ? ` <span class="badge-locked" title="GCP の自動生成 default SA。削除すると依存サービスが壊れるため削除不可。">🔒 削除不可</span>`
+    : "";
+
+  return `<tr class="status-${audit.status}${undeletable ? " undeletable" : ""}">
     <td>${STATUS_LABEL[audit.status]}</td>
     <td>
       <a class="name-link" href="${escapeAttr(saConsoleUrl(projectId, sa.email))}" target="_blank" rel="noopener" title="${escapeAttr(emailTooltip)}">
         ${escapeHtml(sa.email)}
-      </a>
+      </a>${undeletableBadge}
     </td>
     <td>${flagsHtml || `<span class="muted">—</span>`}</td>
     <td>${rolesHtml}</td>
@@ -281,7 +301,34 @@ tr.status-warn { background: rgba(255,193,7,0.06); }
   font-family: monospace;
 }
 .role.more { background: rgba(0,0,0,0.08); color: #555; cursor: help; }
+.badge-locked {
+  display: inline-block;
+  padding: 1px 6px;
+  margin-left: .35rem;
+  background: rgba(0,0,0,0.08);
+  color: #555;
+  border-radius: 3px;
+  font-size: .7rem;
+  font-family: monospace;
+  white-space: nowrap;
+  cursor: help;
+}
 .ts { font-family: monospace; font-size: .8rem; white-space: nowrap; }
 .ts .warn { color: #a06800; font-weight: 600; }
 footer { margin-top: 2rem; font-size: .8rem; }
+
+@media (prefers-color-scheme: dark) {
+  .sub { color: #aaa; }
+  .muted { color: #999; }
+  .summary { background: rgba(255,255,255,0.06); }
+  th { background: rgba(255,255,255,0.05); }
+  th, td { border-bottom-color: rgba(255,255,255,0.1); }
+  tr.status-candidate { background: rgba(220,53,69,0.18); }
+  tr.status-warn { background: rgba(255,193,7,0.12); }
+  .flag { background: rgba(220,53,69,0.3); color: #ffb3b8; }
+  .role { background: rgba(13,110,253,0.25); color: #9ec5ff; }
+  .role.more { background: rgba(255,255,255,0.12); color: #ccc; }
+  .badge-locked { background: rgba(255,255,255,0.12); color: #ccc; }
+  .ts .warn { color: #ffcf66; }
+}
 `;
