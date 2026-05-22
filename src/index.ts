@@ -4,6 +4,7 @@ import type { Env } from "./types";
 import { cfAccessMiddleware, type CfAccessClaims } from "./middleware/cf-access";
 import { listRoutes } from "./routes/list";
 import { inventoryRoutes } from "./routes/inventory";
+import { serviceAccountsRoutes, handleSaDashboard } from "./routes/service-accounts";
 import { handleDashboard } from "./routes/ui";
 
 type AppVariables = { cfAccess: CfAccessClaims };
@@ -24,7 +25,11 @@ app.use("/api/*", cfAccessMiddleware());
 // (`app.use("/", ...)` だと /healthz など全 path にもマッチしてしまうため)。
 app.get("/", cfAccessMiddleware(), handleDashboard);
 
+// /service-accounts は SA 監査 dashboard。同じく per-route で CF Access。
+app.get("/service-accounts", cfAccessMiddleware(), handleSaDashboard);
+
 app.route("/api", listRoutes);
 app.route("/api", inventoryRoutes);
+app.route("/api", serviceAccountsRoutes);
 
 export default app;

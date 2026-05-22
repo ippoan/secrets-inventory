@@ -79,6 +79,7 @@ export function renderInventoryPage(
 
   <nav class="controls">
     <a class="btn btn-primary" href="?commit=1">📸 Snapshot を更新</a>
+    <a class="btn" href="/service-accounts">🛠 SA Inventory</a>
     <a class="btn" href="${escapeAttr(gcpConsoleListUrl(projectId))}" target="_blank" rel="noopener">↗ GCP Console</a>
     <a class="btn" href="/api/inventory">📦 JSON</a>
   </nav>
