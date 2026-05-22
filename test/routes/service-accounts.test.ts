@@ -113,10 +113,12 @@ describe("handleSaDashboard (HTML)", () => {
   });
 
   it("filters by ?status=candidate", async () => {
+    // #29: no-role 単独は warn になったので、true な candidate を作るには
+    // disabled または stale-auth で確定させる必要がある。stale-auth を採用。
     mockProxy({
       service_accounts: [
         { email: "ok@p.iam.gserviceaccount.com", unique_id: "1", disabled: false, roles: ["roles/foo"], keys: [] },
-        { email: "no@p.iam.gserviceaccount.com", unique_id: "2", disabled: false, roles: [], keys: [] },
+        { email: "no@p.iam.gserviceaccount.com", unique_id: "2", disabled: false, roles: [], keys: [], last_authenticated_at: "2025-01-01T00:00:00Z" },
       ],
     });
     const app = new Hono<{ Bindings: Env }>();

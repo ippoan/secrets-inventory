@@ -36,13 +36,14 @@ describe("gatherSaInventory", () => {
             roles: ["roles/foo"],
             keys: [],
           },
-          // candidate (no-role)
+          // candidate (no-role + stale-auth = 真に dead な candidate per #29)
           {
             email: "sa-norole@p.iam.gserviceaccount.com",
             unique_id: "2",
             disabled: false,
             roles: [],
             keys: [],
+            last_authenticated_at: "2025-01-01T00:00:00Z", // 1 年以上前
           },
           // warn (default-sa)
           {

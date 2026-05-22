@@ -15,6 +15,8 @@ const FLAG_LABEL: Record<SaFlag, string> = {
   "key-old": "key-old",
   "default-sa": "default-sa",
   "key-anomaly": "key-anomaly",
+  "stale-auth": "stale-auth",
+  "has-user-key": "has-user-key",
 };
 
 const FLAG_TOOLTIP: Record<SaFlag, string> = {
@@ -23,6 +25,8 @@ const FLAG_TOOLTIP: Record<SaFlag, string> = {
   "key-old": "user-managed key の最古 valid_after が 180 日超",
   "default-sa": "GCE / App Engine の自動生成 default SA (disable 推奨)",
   "key-anomaly": "user-managed key 数 ≥ 3 (rotation 中以外で多すぎ)",
+  "stale-auth": "Policy Analyzer が観測した最終認証が 90 日超過 (= 真に未使用の可能性)",
+  "has-user-key": "USER_MANAGED key を 1 個以上保持 = WIF / ADC へキーレス移行候補",
 };
 
 export interface RenderSaInventoryOptions {
