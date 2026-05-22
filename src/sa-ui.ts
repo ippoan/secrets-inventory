@@ -60,6 +60,7 @@ export function renderSaInventoryPage(
       </a>
       の SA を 5 シグナルで監査します。
       <a class="back" href="/">← Secrets Inventory に戻る</a>
+      <a class="json-link" href="?format=json" title="同 inventory を JSON で取得 (/api/service-accounts と同 shape)">JSON</a>
     </p>
   </header>
 
@@ -190,6 +191,16 @@ body {
 header h1 { margin: 0 0 .25rem; font-size: 1.3rem; }
 .sub { margin: 0 0 1rem; color: #666; }
 .back { margin-left: 1rem; font-size: .85rem; }
+.json-link {
+  margin-left: .5rem;
+  font-size: .75rem;
+  padding: .1rem .4rem;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  text-decoration: none;
+  opacity: .7;
+}
+.json-link:hover { opacity: 1; }
 .name-link { color: inherit; text-decoration: underline dotted; }
 .muted { color: #888; }
 .summary {
