@@ -215,3 +215,76 @@ describe("handleSaDashboard (HTML)", () => {
     consoleSpy.mockRestore();
   });
 });
+
+describe("handleSaDashboard (JSON via ?format=json)", () => {
+  it("returns JSON inventory on success, mirroring /api/service-accounts", async () => {
+    mockProxy({
+      service_accounts: [
+        {
+          email: "sa@p.iam.gserviceaccount.com",
+          unique_id: "1",
+          disabled: false,
+          roles: ["roles/foo"],
+          keys: [],
+        },
+      ],
+    });
+    const app = new Hono<{ Bindings: Env }>();
+    app.get("/service-accounts", handleSaDashboard);
+    const res = await app.request("/service-accounts?format=json", {}, mkEnv());
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Content-Type")).toMatch(/application\/json/);
+    const body = (await res.json()) as {
+      gcp_project_id: string;
+      rows: unknown[];
+      summary: { total: number };
+    };
+    expect(body.gcp_project_id).toBe("cloudsql-sv");
+    expect(body.summary.total).toBe(1);
+  });
+
+  it("returns 502 + JSON error on GcpIamUnavailableError", async () => {
+    mockProxy("boom", 502);
+    const app = new Hono<{ Bindings: Env }>();
+    app.get("/service-accounts", handleSaDashboard);
+    const res = await app.request("/service-accounts?format=json", {}, mkEnv());
+    expect(res.status).toBe(502);
+    expect(res.headers.get("Content-Type")).toMatch(/application\/json/);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toMatch(/GCP IAM proxy unavailable/);
+  });
+
+  it("returns 500 + JSON error on unexpected non-Gcp throw", async () => {
+    const mod = await import("../../src/sa-inventory");
+    const spy = vi
+      .spyOn(mod, "gatherSaInventory")
+      .mockRejectedValue(new RangeError("synthetic-json"));
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const app = new Hono<{ Bindings: Env }>();
+    app.get("/service-accounts", handleSaDashboard);
+    const res = await app.request("/service-accounts?format=json", {}, mkEnv());
+    expect(res.status).toBe(500);
+    expect(res.headers.get("Content-Type")).toMatch(/application\/json/);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toContain("synthetic-json");
+    spy.mockRestore();
+    consoleSpy.mockRestore();
+  });
+
+  it("ignores ?format=json when value is anything else (e.g. ?format=html)", async () => {
+    mockProxy({
+      service_accounts: [
+        { email: "sa@p.iam.gserviceaccount.com", unique_id: "1", disabled: false, roles: ["roles/foo"], keys: [] },
+      ],
+    });
+    const app = new Hono<{ Bindings: Env }>();
+    app.get("/service-accounts", handleSaDashboard);
+    const res = await app.request(
+      "/service-accounts?format=html",
+      {},
+      mkEnv(),
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Content-Type")).toMatch(/text\/html/);
+  });
+});
