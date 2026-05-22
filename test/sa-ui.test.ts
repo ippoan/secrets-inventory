@@ -97,6 +97,13 @@ describe("renderSaInventoryPage", () => {
     expect(html).toContain("desc: auto-created by GCE");
   });
 
+  it("renders a discoverable JSON link in the header", () => {
+    const html = renderSaInventoryPage(baseResult);
+    expect(html).toContain(`class="json-link"`);
+    expect(html).toContain(`href="?format=json"`);
+    expect(html).toContain(">JSON</a>");
+  });
+
   it("filters by status when opts.filter is set", () => {
     const html = renderSaInventoryPage(baseResult, { filter: "candidate" });
     expect(html).toContain("sa-norole@");
