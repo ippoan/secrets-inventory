@@ -35,6 +35,15 @@ export interface ServiceAccount {
   disabled: boolean;
   roles: string[];
   keys: SaKey[];
+  /**
+   * Policy Analyzer (`serviceAccountLastAuthentication`) が観測した最終認証時刻
+   * (RFC3339)。proxy 側で空文字なら "観測期間中認証なし" / "Policy Analyzer 失敗"
+   * / "API 未有効" のいずれか — Worker 側からは区別不能 (全部 undefined)。
+   *
+   * 値の精度は GCP 側で日次粒度に丸められる (内部的に T07:00:00Z 等で出ることが
+   * docs にある) ため、UI 側では "N 日前" 表示で扱う。
+   */
+  last_authenticated_at?: string;
 }
 
 interface ProxyRawKey {
@@ -52,6 +61,7 @@ interface ProxyRawSa {
   disabled: boolean;
   roles?: string[];
   keys?: ProxyRawKey[];
+  last_authenticated_at?: string;
 }
 
 interface ProxyListResponse {
@@ -100,6 +110,9 @@ function toServiceAccount(s: ProxyRawSa): ServiceAccount {
       valid_after: k.valid_after,
       valid_before: k.valid_before,
     })),
+    // proxy が空文字を送ってくる "no data" ケースを undefined に正規化 (UI 側で
+    // `s.last_authenticated_at ?? "—"` の判定が 1 統で済む)。
+    last_authenticated_at: s.last_authenticated_at ? s.last_authenticated_at : undefined,
   };
 }
 

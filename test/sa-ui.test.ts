@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { renderSaInventoryPage } from "../src/sa-ui";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { renderSaInventoryPage, renderLastAuth } from "../src/sa-ui";
 import type { SaInventoryResult } from "../src/sa-inventory";
 
 const baseResult: SaInventoryResult = {
@@ -279,5 +279,107 @@ describe("renderSaInventoryPage", () => {
     };
     const html = renderSaInventoryPage(result);
     expect(html).toContain(">custom/foo</span>");
+  });
+
+  it("renders 「最終認証」 column header", () => {
+    const html = renderSaInventoryPage(baseResult);
+    expect(html).toContain("<th>最終認証</th>");
+  });
+
+  it("uses colspan=8 for the empty-state row (= column count after 最終認証 added)", () => {
+    const result = {
+      ...baseResult,
+      rows: [],
+      summary: { total: 0, ok: 0, warn: 0, candidate: 0 },
+    };
+    const html = renderSaInventoryPage(result);
+    expect(html).toContain(`colspan="8"`);
+  });
+
+  it("renders last_authenticated_at as 「N 日前」 for each row when present", () => {
+    // Date.now() を fixate して "117 日前" を deterministic に検証
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-22T00:00:00Z"));
+    try {
+      const result: SaInventoryResult = {
+        ...baseResult,
+        rows: [
+          {
+            sa: {
+              email: "active@p.iam.gserviceaccount.com",
+              unique_id: "1",
+              disabled: false,
+              roles: ["roles/foo"],
+              keys: [],
+              last_authenticated_at: "2026-01-25T00:00:00Z", // 117 日前 (jan25→may22, no T offset)
+            },
+            audit: {
+              flags: [],
+              status: "ok",
+              oldest_user_key_age_days: null,
+              user_managed_key_count: 0,
+            },
+          },
+        ],
+        summary: { total: 1, ok: 1, warn: 0, candidate: 0 },
+      };
+      const html = renderSaInventoryPage(result);
+      expect(html).toMatch(/>117 日前<\/span>/);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("renderLastAuth", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-22T00:00:00Z"));
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("returns 「—」 with explanatory tooltip when undefined", () => {
+    const html = renderLastAuth(undefined);
+    expect(html).toContain("—");
+    expect(html).toContain(`class="muted"`);
+    expect(html).toContain("Policy Analyzer");
+  });
+
+  it("returns 「—」 when empty string", () => {
+    expect(renderLastAuth("")).toContain("—");
+  });
+
+  it("renders N 日前 for typical RFC3339 input", () => {
+    expect(renderLastAuth("2026-05-15T07:00:00Z")).toMatch(/>6 日前<\/span>/);
+  });
+
+  it("renders 0 日前 for today", () => {
+    expect(renderLastAuth("2026-05-22T00:00:00Z")).toMatch(/>0 日前<\/span>/);
+  });
+
+  it("applies warn class when over 90 days", () => {
+    const html = renderLastAuth("2026-01-01T07:00:00Z"); // ~141 日前
+    expect(html).toContain(`class="warn"`);
+    expect(html).toMatch(/14[01] 日前/);
+  });
+
+  it("does not apply warn class for fresh auth", () => {
+    const html = renderLastAuth("2026-05-15T07:00:00Z"); // 6 日前
+    expect(html).not.toContain(`class="warn"`);
+  });
+
+  it("clamps future timestamps to 「0 日前」 (clock drift / api bug)", () => {
+    expect(renderLastAuth("2027-01-01T00:00:00Z")).toMatch(/>0 日前<\/span>/);
+  });
+
+  it("returns 「?」 on unparseable string", () => {
+    expect(renderLastAuth("not-a-date")).toContain(">?</span>");
+  });
+
+  it("preserves the original RFC3339 as tooltip", () => {
+    const html = renderLastAuth("2026-05-15T07:00:00Z");
+    expect(html).toContain(`title="2026-05-15T07:00:00Z"`);
   });
 });
