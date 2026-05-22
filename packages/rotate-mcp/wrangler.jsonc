@@ -1,0 +1,51 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "secrets-rotate-mcp",
+  "main": "src/index.ts",
+  "account_id": "24b45709d060d957340180e995f0d373",
+  "compatibility_date": "2026-04-06",
+  "observability": {
+    "enabled": true
+  },
+  // Phase A 骨格: tool は mock 実装、実 write はしない。
+  //
+  // - CF Access (Google OAuth) で edge 認証 → JWT を `Cf-Access-Jwt-Assertion`
+  //   で worker に到達。secrets-inventory worker と同じ team_domain / aud を
+  //   再利用する (同じ CF Access Application で保護する想定)。
+  // - tool 呼び出しは Bearer (Secrets Store binding `ROTATE_MCP_BEARER`) で
+  //   二重認証。30-day rotation 想定 (rotation 自体は Phase B 以降で
+  //   `rotate_secret` 自己呼び出しで dogfooding 化)。
+  // - Phase A 時点では実書き込み先 (GCP proxy / CF API / GitHub) との binding
+  //   は無し。Phase B で `secrets-inventory-gcp` proxy 経由の GCP write、
+  //   CF API token (Secrets Store rotate scope)、GitHub PAT (write scope) を
+  //   追加する。
+  "vars": {
+    "CF_ACCESS_TEAM_DOMAIN": "mtamaramu.cloudflareaccess.com",
+    "CF_ACCESS_AUD": "7cdf1cb650bc61c5827070e2a9df96166362f7c36934bcc5bf271c738af99b3f",
+    "MCP_SERVER_NAME": "secrets-rotate-mcp",
+    "MCP_SERVER_VERSION": "0.0.1",
+    "MCP_PROTOCOL_VERSION": "2025-03-26"
+  },
+  "env": {
+    "staging": {
+      "name": "secrets-rotate-mcp-staging",
+      "account_id": "24b45709d060d957340180e995f0d373",
+      "workers_dev": true,
+      "observability": { "enabled": true },
+      "vars": {
+        "CF_ACCESS_TEAM_DOMAIN": "mtamaramu.cloudflareaccess.com",
+        "CF_ACCESS_AUD": "7cdf1cb650bc61c5827070e2a9df96166362f7c36934bcc5bf271c738af99b3f",
+        "MCP_SERVER_NAME": "secrets-rotate-mcp",
+        "MCP_SERVER_VERSION": "0.0.1",
+        "MCP_PROTOCOL_VERSION": "2025-03-26"
+      },
+      "secrets_store_secrets": [
+        {
+          "binding": "ROTATE_MCP_BEARER",
+          "store_id": "bd7bc91a3e5f4111add4acf6cb4b8733",
+          "secret_name": "rotate-mcp-bearer"
+        }
+      ]
+    }
+  }
+}
