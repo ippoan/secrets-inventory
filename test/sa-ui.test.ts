@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { renderSaInventoryPage, renderLastAuth } from "../src/sa-ui";
+import { renderSaInventoryPage, renderLastAuth, isUndeletableDefaultSa } from "../src/sa-ui";
 import type { SaInventoryResult } from "../src/sa-inventory";
 
 const baseResult: SaInventoryResult = {
@@ -381,5 +381,45 @@ describe("renderLastAuth", () => {
   it("preserves the original RFC3339 as tooltip", () => {
     const html = renderLastAuth("2026-05-15T07:00:00Z");
     expect(html).toContain(`title="2026-05-15T07:00:00Z"`);
+  });
+});
+
+describe("isUndeletableDefaultSa", () => {
+  it("flags Compute default SA (@developer.gserviceaccount.com)", () => {
+    expect(isUndeletableDefaultSa("747065218280-compute@developer.gserviceaccount.com")).toBe(true);
+  });
+
+  it("flags App Engine default SA (@appspot.gserviceaccount.com)", () => {
+    expect(isUndeletableDefaultSa("cloudsql-sv@appspot.gserviceaccount.com")).toBe(true);
+  });
+
+  it("does not flag normal user-managed SA (@*.iam.gserviceaccount.com)", () => {
+    expect(isUndeletableDefaultSa("cloud-run-deployer@cloudsql-sv.iam.gserviceaccount.com")).toBe(false);
+  });
+});
+
+describe("renderSaInventoryPage — undeletable badge", () => {
+  it("renders 🔒 削除不可 badge for @developer.gserviceaccount.com row", () => {
+    const html = renderSaInventoryPage(baseResult);
+    // badge must appear, attached to the developer SA row
+    expect(html).toContain("🔒 削除不可");
+    // confirm it lands on the compute default SA row (badge appears after email)
+    const idx = html.indexOf("9-compute@developer.gserviceaccount.com");
+    const badgeIdx = html.indexOf("🔒 削除不可", idx);
+    expect(badgeIdx).toBeGreaterThan(idx);
+    // user-managed SA row must NOT carry the badge
+    const okIdx = html.indexOf("sa-ok@p.iam.gserviceaccount.com");
+    const badgeAfterOk = html.indexOf("🔒 削除不可", okIdx);
+    expect(badgeAfterOk).toBe(-1);
+  });
+
+  it("adds undeletable class on the row for styling hook", () => {
+    const html = renderSaInventoryPage(baseResult);
+    expect(html).toMatch(/<tr class="status-warn undeletable">/);
+  });
+
+  it("updates default-sa tooltip to explain non-deletability", () => {
+    const html = renderSaInventoryPage(baseResult);
+    expect(html).toContain("削除不可");
   });
 });
