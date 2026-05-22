@@ -23,6 +23,10 @@ function mkEnv(): Env {
     GCP_PROXY_URL: "https://proxy.example",
     GCP_PROXY_API_KEY: { get: async () => "api-key" } as Env["GCP_PROXY_API_KEY"],
     SNAPSHOT_KV: {} as KVNamespace,
+    MCP_SERVER_NAME: "secrets-inventory-read-mcp",
+    MCP_SERVER_VERSION: "0.0.1",
+    MCP_PROTOCOL_VERSION: "2025-03-26",
+    INVENTORY_MCP_BEARER: { get: async () => "test-bearer" } as Env["INVENTORY_MCP_BEARER"],
   };
 }
 

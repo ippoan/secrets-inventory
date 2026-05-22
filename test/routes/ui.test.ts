@@ -36,6 +36,10 @@ const baseEnv: Env = {
   GCP_PROXY_URL: "https://gcp-stub.run.app",
   GCP_PROXY_API_KEY: mockSecret("shared"),
   SNAPSHOT_KV: makeKv(),
+  MCP_SERVER_NAME: "secrets-inventory-read-mcp",
+  MCP_SERVER_VERSION: "0.0.1",
+  MCP_PROTOCOL_VERSION: "2025-03-26",
+  INVENTORY_MCP_BEARER: mockSecret("test-bearer"),
 };
 
 /**

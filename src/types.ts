@@ -48,4 +48,13 @@ export interface Env {
 
   // KV: PR3 で前回の name 一覧スナップショットを格納
   SNAPSHOT_KV: KVNamespace;
+
+  // MCP server (read MCP route `/mcp`)。CF Access の上に Bearer の二重認証を
+  // 載せて AI client / tool call を identify する。Bearer は Secrets Store に
+  // 保管し、`INVENTORY_MCP_BEARER` binding 経由で取得する。MCP_* vars は
+  // initialize / serverInfo response の出処。
+  MCP_SERVER_NAME: string;
+  MCP_SERVER_VERSION: string;
+  MCP_PROTOCOL_VERSION: string;
+  INVENTORY_MCP_BEARER: SecretsStoreSecret;
 }

@@ -28,7 +28,13 @@
     "CF_STORE_ID": "bd7bc91a3e5f4111add4acf6cb4b8733",
     "GITHUB_ORG": "ippoan",
     "GCP_PROJECT_ID": "cloudsql-sv",
-    "GCP_PROXY_URL": "https://secrets-inventory-gcp-staging-566bls5vfq-an.a.run.app"
+    "GCP_PROXY_URL": "https://secrets-inventory-gcp-staging-566bls5vfq-an.a.run.app",
+    // MCP server identity (initialize / serverInfo response 用)。
+    // protocol version は @modelcontextprotocol/sdk v1.29 が対応する最新
+    // streamable HTTP spec の日付 (2025-03-26)。
+    "MCP_SERVER_NAME": "secrets-inventory-read-mcp",
+    "MCP_SERVER_VERSION": "0.0.1",
+    "MCP_PROTOCOL_VERSION": "2025-03-26"
   },
   "secrets_store_secrets": [
     {
@@ -45,6 +51,16 @@
       "binding": "GCP_PROXY_API_KEY",
       "store_id": "bd7bc91a3e5f4111add4acf6cb4b8733",
       "secret_name": "secrets-inventory-gcp-proxy-api-key"
+    },
+    {
+      // /mcp/* route の二重認証 (CF Access の上に重ねる) 用 Bearer。
+      // secrets-rotate-mcp の `rotate-mcp-bearer` とは別 token (= 失効時の
+      // blast radius を read / write で分離する)。手動 provisioning + 30 日
+      // ごとに rotation する想定 (rotate-mcp の dogfooding 拡大時に
+      // この read MCP の bearer も rotate 対象に組み込む)。
+      "binding": "INVENTORY_MCP_BEARER",
+      "store_id": "bd7bc91a3e5f4111add4acf6cb4b8733",
+      "secret_name": "inventory-mcp-bearer"
     }
   ],
   // `secrets.required` は ci-workflows/secret-verify-gcp.yml の入力。GCP
@@ -57,7 +73,8 @@
     "required": [
       "cf-secrets-inventory-secrets-store-read",
       "gh-secrets-inventory-org-secrets-read",
-      "secrets-inventory-gcp-proxy-api-key"
+      "secrets-inventory-gcp-proxy-api-key",
+      "inventory-mcp-bearer"
     ]
   },
   "kv_namespaces": [
@@ -79,7 +96,10 @@
         "CF_STORE_ID": "bd7bc91a3e5f4111add4acf6cb4b8733",
         "GITHUB_ORG": "ippoan",
         "GCP_PROJECT_ID": "cloudsql-sv",
-        "GCP_PROXY_URL": "https://secrets-inventory-gcp-staging-566bls5vfq-an.a.run.app"
+        "GCP_PROXY_URL": "https://secrets-inventory-gcp-staging-566bls5vfq-an.a.run.app",
+        "MCP_SERVER_NAME": "secrets-inventory-read-mcp",
+        "MCP_SERVER_VERSION": "0.0.1",
+        "MCP_PROTOCOL_VERSION": "2025-03-26"
       },
       "secrets_store_secrets": [
         {
@@ -96,6 +116,11 @@
           "binding": "GCP_PROXY_API_KEY",
           "store_id": "bd7bc91a3e5f4111add4acf6cb4b8733",
           "secret_name": "secrets-inventory-gcp-proxy-api-key"
+        },
+        {
+          "binding": "INVENTORY_MCP_BEARER",
+          "store_id": "bd7bc91a3e5f4111add4acf6cb4b8733",
+          "secret_name": "inventory-mcp-bearer"
         }
       ],
       "kv_namespaces": [
