@@ -47,6 +47,19 @@
       "secret_name": "secrets-inventory-gcp-proxy-api-key"
     }
   ],
+  // `secrets.required` は ci-workflows/secret-verify-gcp.yml の入力。GCP
+  // Secret Manager 上に **これらと完全に同名の secret が存在することを CI
+  // で検証**する。CF Secrets Store の `secret_name` (kebab-case) と揃えて
+  // 宣言。命名規約 (#23) で kebab か SCREAMING_SNAKE どちらに寄せるかが
+  // まだ未決のため、CI が検出した時点で GCP 側に 3 secret を kebab で作成
+  // するか、または本宣言を変更するかを判断する想定。
+  "secrets": {
+    "required": [
+      "cf-secrets-inventory-secrets-store-read",
+      "gh-secrets-inventory-org-secrets-read",
+      "secrets-inventory-gcp-proxy-api-key"
+    ]
+  },
   "kv_namespaces": [
     {
       "binding": "SNAPSHOT_KV",
