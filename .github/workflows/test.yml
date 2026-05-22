@@ -21,28 +21,12 @@ jobs:
       typecheck_command: 'npx tsc --noEmit'
       deploy_staging_script: 'npx wrangler deploy --env staging'
       deploy_release_script: 'npx wrangler deploy'
+      # GCP Secret Manager verify は frontend-ci の中に直列で組み込まれて
+      # いる (ci-workflows#38)。`gcp_secret_verify_*` 3 input を渡すだけで
+      # `ci / secret-verify` が test/typecheck の後段に追加される。
+      # vars が未設定の間は ci-workflows 側の `if:` で skip され、deploy も
+      # `skipped` 扱いで進む (backward compat)。
+      gcp_secret_verify_project: cloudsql-sv
+      gcp_secret_verify_provider: ${{ vars.GCP_WIF_PROVIDER }}
+      gcp_secret_verify_sa: ${{ vars.GCP_WIF_SERVICE_ACCOUNT_VERIFIER }}
     secrets: inherit
-
-  # `verify` is intentionally serial after `ci` (`needs: [ci]`) instead of a
-  # separate top-level workflow file (`secret-verify.yml`). Serial cause:
-  # (1) only check Secret Manager once the unit tests / typecheck for the
-  # current commit are green — verifying secrets backing a broken build is
-  # wasted gcloud quota; (2) makes the status check graph one chain instead
-  # of two parallel chains so branch protection requirements are easier to
-  # reason about. Skip pattern (`vars.*` 未設定で job 全体 skip) は deploy
-  # 系と同じで、setup 完了後に variable が入った瞬間に enforce が始まる。
-  verify:
-    needs: [ci]
-    if: |
-      vars.GCP_WIF_PROVIDER != '' &&
-      vars.GCP_WIF_SERVICE_ACCOUNT_VERIFIER != ''
-    permissions:
-      contents: read
-      id-token: write   # WIF OIDC token mint 用
-    uses: ippoan/ci-workflows/.github/workflows/secret-verify-gcp.yml@main
-    with:
-      project: cloudsql-sv
-      repo_type: worker
-      # wrangler_path 未指定 → リポジトリ root の wrangler.jsonc を autodetect
-      workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
-      service_account: ${{ vars.GCP_WIF_SERVICE_ACCOUNT_VERIFIER }}
