@@ -15,6 +15,11 @@ permissions:
 jobs:
   ci:
     uses: ippoan/ci-workflows/.github/workflows/frontend-ci.yml@main
+    permissions:
+      contents: write          # auto-merge 用
+      pull-requests: write     # auto-merge / pr-limit 用
+      packages: read           # npm_scope 用
+      id-token: write          # nested `secret-verify` job が WIF OIDC token を mint するため
     with:
       project_type: 'worker'
       install_command: 'npm install'
