@@ -423,3 +423,17 @@ describe("renderSaInventoryPage — undeletable badge", () => {
     expect(html).toContain("削除不可");
   });
 });
+
+describe("renderSaInventoryPage — dark mode styles", () => {
+  it("emits a prefers-color-scheme:dark media block for chip readability", () => {
+    const html = renderSaInventoryPage(baseResult);
+    expect(html).toContain("@media (prefers-color-scheme: dark)");
+  });
+
+  it("overrides flag/role chip text colors with brighter dark-mode variants", () => {
+    const html = renderSaInventoryPage(baseResult);
+    // dark mode 用の明るい文字色 (#ffb3b8 = flag, #9ec5ff = role)
+    expect(html).toContain("#ffb3b8");
+    expect(html).toContain("#9ec5ff");
+  });
+});

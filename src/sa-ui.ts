@@ -316,4 +316,19 @@ tr.status-warn { background: rgba(255,193,7,0.06); }
 .ts { font-family: monospace; font-size: .8rem; white-space: nowrap; }
 .ts .warn { color: #a06800; font-weight: 600; }
 footer { margin-top: 2rem; font-size: .8rem; }
+
+@media (prefers-color-scheme: dark) {
+  .sub { color: #aaa; }
+  .muted { color: #999; }
+  .summary { background: rgba(255,255,255,0.06); }
+  th { background: rgba(255,255,255,0.05); }
+  th, td { border-bottom-color: rgba(255,255,255,0.1); }
+  tr.status-candidate { background: rgba(220,53,69,0.18); }
+  tr.status-warn { background: rgba(255,193,7,0.12); }
+  .flag { background: rgba(220,53,69,0.3); color: #ffb3b8; }
+  .role { background: rgba(13,110,253,0.25); color: #9ec5ff; }
+  .role.more { background: rgba(255,255,255,0.12); color: #ccc; }
+  .badge-locked { background: rgba(255,255,255,0.12); color: #ccc; }
+  .ts .warn { color: #ffcf66; }
+}
 `;
