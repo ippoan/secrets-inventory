@@ -1,69 +1,39 @@
-import type { SecretMetadata } from "../types";
+import type { Env, SecretMetadata } from "../types";
 
-const CF_API = "https://api.cloudflare.com/client/v4";
+// Cloudflare Secrets Store provider。
+//
+// **Refs #45** 以前は worker が CF API token (`env.CF_API_TOKEN`) を Secrets
+// Store binding 経由で持ち、`api.cloudflare.com` を直接叩いていた。Stage 2 で
+// 「worker は GCP proxy 経由でしか外部に出ない」ポリシーに統一したため、
+// 本 module は **`secrets-inventory-gcp` Cloud Run proxy 経由**に書き換わった。
+//
+// proxy endpoint (= ippoan/secrets-inventory-gcp#25 で追加):
+//   - GET  /cf/secrets        → list
+//   - POST /cf/secrets        → create
+//   - POST /cf/secrets/{id}   → rotate (PATCH を内部委譲)
+//
+// 認証は `X-Inventory-API-Key` = `GCP_PROXY_API_KEY` で proxy と共有。
+// worker は CF API token を持たない (= proxy が GCP Secret Manager から
+// runtime 取得する)。
 
-export interface CfContext {
-  token: string;
-  accountId: string;
-  storeId: string;
-}
-
-export class CloudflareApiError extends Error {
+export class CloudflareProxyError extends Error {
   constructor(
     public status: number,
     message: string,
   ) {
     super(message);
-    this.name = "CloudflareApiError";
+    this.name = "CloudflareProxyError";
   }
 }
 
-interface CfEnvelope<T> {
-  success: boolean;
-  result: T;
-  errors?: Array<{ code: number; message: string }>;
+export interface CfProxyContext {
+  proxyUrl: string;
+  apiKey: string;
+  /** 操作者 email (actor audit log 用)。read 経路では未使用。 */
+  actorEmail?: string;
 }
 
-export async function cfApi<T>(
-  ctx: CfContext,
-  method: string,
-  path: string,
-): Promise<T> {
-  const res = await fetch(`${CF_API}${path}`, {
-    method,
-    headers: {
-      Authorization: `Bearer ${ctx.token}`,
-      Accept: "application/json",
-      "User-Agent": "secrets-inventory",
-    },
-  });
-
-  if (!res.ok) {
-    const body = await res.text();
-    throw new CloudflareApiError(
-      res.status,
-      `Cloudflare API ${res.status}: ${body}`,
-    );
-  }
-
-  const json = (await res.json()) as CfEnvelope<T>;
-  if (!json.success) {
-    const msg = (json.errors ?? [])
-      .map((e) => `${e.code}: ${e.message}`)
-      .join("; ");
-    throw new CloudflareApiError(
-      res.status,
-      `Cloudflare API error: ${msg || "unknown"}`,
-    );
-  }
-  return json.result;
-}
-
-export function secretsStorePath(ctx: CfContext, suffix = ""): string {
-  return `/accounts/${ctx.accountId}/secrets_store/stores/${ctx.storeId}/secrets${suffix}`;
-}
-
-interface CfSecretRaw {
+interface CfRawSecret {
   id: string;
   name: string;
   comment?: string | null;
@@ -73,15 +43,31 @@ interface CfSecretRaw {
   modified?: string | null;
 }
 
+interface CfListResponse {
+  secrets?: CfRawSecret[];
+}
+
 /**
- * Cloudflare Secrets Store の secret 一覧をメタデータのみで返す。
- * 値は API がそもそも返さないため、構造的に流出しない。
+ * proxy 経由で CF Secrets Store の secret list を取得。
+ * 値は API がそもそも返さない (= proxy も pass-through) ので構造的に値漏洩無し。
  */
 export async function listCloudflareSecrets(
-  ctx: CfContext,
+  ctx: CfProxyContext,
 ): Promise<SecretMetadata[]> {
-  const raw = await cfApi<CfSecretRaw[]>(ctx, "GET", secretsStorePath(ctx));
-  return raw.map((s) => ({
+  const res = await fetch(`${ctx.proxyUrl}/cf/secrets`, {
+    method: "GET",
+    headers: {
+      "X-Inventory-API-Key": ctx.apiKey,
+      Accept: "application/json",
+      "User-Agent": "secrets-inventory",
+    },
+  });
+  if (!res.ok) {
+    const body = (await res.text()).slice(0, 200);
+    throw new CloudflareProxyError(res.status, `CF proxy ${res.status}: ${body}`);
+  }
+  const raw = (await res.json()) as CfListResponse;
+  return (raw.secrets ?? []).map((s) => ({
     name: s.name,
     id: s.id,
     created_at: s.created ?? null,
@@ -92,4 +78,186 @@ export async function listCloudflareSecrets(
       status: s.status ?? null,
     },
   }));
+}
+
+// ===========================================================================
+// write 系 (= 旧 packages/rotate-mcp の rotateCloudflare / createCloudflare を
+// proxy 経由に書き換えたもの)
+// ===========================================================================
+
+export interface CfRotateArgs {
+  name: string;
+  newValue: string;
+}
+
+export interface CfRotateResult {
+  status: "ok" | "fail";
+  secret_id?: string;
+  error?: string;
+}
+
+/**
+ * 既存 secret の値を更新 (= rotation):
+ *   1) proxy `GET /cf/secrets` で name → id を解決
+ *   2) proxy `POST /cf/secrets/{id}` で値を更新
+ *
+ * 失敗は status="fail" で返し throw しない (= 並列実行で他 provider を巻き込まない)。
+ * 値は body の `value` field のみ、log / response に echo しない。
+ */
+export async function rotateCloudflare(
+  args: CfRotateArgs,
+  ctx: CfProxyContext,
+): Promise<CfRotateResult> {
+  const id = await resolveSecretId(args.name, ctx);
+  if (id.kind === "error") return { status: "fail", error: id.error };
+  if (id.kind === "not_found") {
+    return { status: "fail", error: `cf secret not found: ${args.name}` };
+  }
+
+  let res: Response;
+  try {
+    res = await fetch(`${ctx.proxyUrl}/cf/secrets/${id.id}`, {
+      method: "POST",
+      headers: proxyHeaders(ctx),
+      body: JSON.stringify({ value: args.newValue }),
+    });
+  } catch (err) {
+    return {
+      status: "fail",
+      error: `cf proxy network: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+  if (!res.ok) {
+    const body = (await res.text()).slice(0, 200);
+    return { status: "fail", error: `cf proxy ${res.status}: ${body}` };
+  }
+  return { status: "ok", secret_id: id.id };
+}
+
+export interface CfCreateArgs {
+  name: string;
+  initialValue: string;
+  /** false で既存 secret 再利用 (= rotate 経路に降りる)。default true. */
+  failIfExists?: boolean;
+  /** CF Secrets Store scopes (e.g. ["workers"])。default = proxy 側 ["workers"]。 */
+  scopes?: string[];
+}
+
+export interface CfCreateResult extends CfRotateResult {
+  /** 新規作成 = true、既存再利用 = false。conflict (= fail) では undefined。 */
+  created?: boolean;
+}
+
+/**
+ * 新規 secret 作成。`fail_if_exists` semantics は **worker (本関数) 側で
+ * list-then-create** で実装する:
+ *
+ *   1) GET /cf/secrets で既存 name 有無を確認
+ *   2) 既存 + fail_if_exists=true → fail
+ *      既存 + fail_if_exists=false → rotate (POST /cf/secrets/{id}) で値だけ更新
+ *      不存在 → POST /cf/secrets で create
+ *
+ * proxy は単純な POST だけ提供する設計 (= proxy をシンプルに保ち、existence
+ * 判定 + 分岐は worker 側に閉じる)。
+ */
+export async function createCloudflare(
+  args: CfCreateArgs,
+  ctx: CfProxyContext,
+): Promise<CfCreateResult> {
+  const failIfExists = args.failIfExists ?? true;
+
+  const existing = await resolveSecretId(args.name, ctx);
+  if (existing.kind === "error") return { status: "fail", error: existing.error };
+
+  if (existing.kind === "found") {
+    if (failIfExists) {
+      return { status: "fail", error: "cf secret already exists" };
+    }
+    // 既存再利用: rotate 経路で値だけ更新
+    const rotated = await rotateCloudflare(
+      { name: args.name, newValue: args.initialValue },
+      ctx,
+    );
+    if (rotated.status !== "ok") return rotated;
+    return { ...rotated, created: false };
+  }
+
+  // 新規 create
+  let res: Response;
+  try {
+    res = await fetch(`${ctx.proxyUrl}/cf/secrets`, {
+      method: "POST",
+      headers: proxyHeaders(ctx),
+      body: JSON.stringify({
+        name: args.name,
+        value: args.initialValue,
+        scopes: args.scopes,
+      }),
+    });
+  } catch (err) {
+    return {
+      status: "fail",
+      error: `cf proxy network: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+  if (!res.ok) {
+    const body = (await res.text()).slice(0, 200);
+    return { status: "fail", error: `cf proxy ${res.status}: ${body}` };
+  }
+  let parsed: { ok?: boolean; secret_id?: string };
+  try {
+    parsed = (await res.json()) as typeof parsed;
+  } catch (err) {
+    return {
+      status: "fail",
+      error: `cf proxy bad json: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+  if (!parsed.ok || typeof parsed.secret_id !== "string") {
+    return { status: "fail", error: "cf proxy returned ok=false or missing secret_id" };
+  }
+  return { status: "ok", secret_id: parsed.secret_id, created: true };
+}
+
+type ResolvedId =
+  | { kind: "found"; id: string }
+  | { kind: "not_found" }
+  | { kind: "error"; error: string };
+
+async function resolveSecretId(name: string, ctx: CfProxyContext): Promise<ResolvedId> {
+  let secrets: SecretMetadata[];
+  try {
+    secrets = await listCloudflareSecrets(ctx);
+  } catch (err) {
+    return {
+      kind: "error",
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+  const hit = secrets.find((s) => s.name === name);
+  if (!hit || !hit.id) return { kind: "not_found" };
+  return { kind: "found", id: hit.id };
+}
+
+function proxyHeaders(ctx: CfProxyContext): Record<string, string> {
+  const h: Record<string, string> = {
+    "X-Inventory-API-Key": ctx.apiKey,
+    "Content-Type": "application/json",
+    Accept: "application/json",
+    "User-Agent": "secrets-inventory",
+  };
+  if (ctx.actorEmail) h["X-Actor-Email"] = ctx.actorEmail;
+  return h;
+}
+
+/**
+ * Env から proxy ctx を組み立てる helper。inventory.ts / tool 実装から共通利用。
+ * API key の取得 (= Secrets Store binding `.get()`) も一緒にやる。
+ */
+export async function cfProxyCtxFromEnv(
+  env: Env,
+  actorEmail?: string,
+): Promise<CfProxyContext> {
+  const apiKey = await env.GCP_PROXY_API_KEY.get();
+  return { proxyUrl: env.GCP_PROXY_URL, apiKey, actorEmail };
 }

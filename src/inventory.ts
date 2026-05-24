@@ -63,23 +63,23 @@ export async function gatherInventory(
   env: Env,
   opts: GatherOptions = {},
 ): Promise<InventoryResult> {
+  // Refs #45: 3 provider すべて GCP proxy 経由に統一されたため、worker が持つ
+  // secret は `GCP_PROXY_API_KEY` 1 個だけ。1 度 fetch して 3 provider 並列
+  // 呼び出しで共有する。`.get()` 自体が throw した場合は GCP source of truth
+  // にも到達できないため GcpUnavailableError として扱う (= 旧 CF/GH 個別
+  // throw 経路は #45 で消滅)。
+  const proxyUrl = env.GCP_PROXY_URL;
+  let apiKey: string;
+  try {
+    apiKey = await env.GCP_PROXY_API_KEY.get();
+  } catch (err) {
+    throw new GcpUnavailableError(err);
+  }
+
   const [gcpSettled, ghSettled, cfSettled] = await Promise.allSettled([
-    (async () => {
-      const apiKey = await env.GCP_PROXY_API_KEY.get();
-      return listGcpSecrets({ proxyUrl: env.GCP_PROXY_URL, apiKey });
-    })(),
-    (async () => {
-      const token = await env.GITHUB_PAT.get();
-      return listGitHubOrgSecrets({ token, org: env.GITHUB_ORG });
-    })(),
-    (async () => {
-      const token = await env.CF_API_TOKEN.get();
-      return listCloudflareSecrets({
-        token,
-        accountId: env.CF_ACCOUNT_ID,
-        storeId: env.CF_STORE_ID,
-      });
-    })(),
+    listGcpSecrets({ proxyUrl, apiKey }),
+    listGitHubOrgSecrets({ proxyUrl, apiKey }),
+    listCloudflareSecrets({ proxyUrl, apiKey }),
   ]);
 
   if (gcpSettled.status === "rejected") {

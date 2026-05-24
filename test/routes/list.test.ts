@@ -18,9 +18,7 @@ const baseEnv: Env = {
   CF_ACCESS_AUD: "aud",
   CF_ACCOUNT_ID: "acc",
   CF_STORE_ID: "store",
-  CF_API_TOKEN: mockSecret("cf-tok"),
   GITHUB_ORG: "ippoan",
-  GITHUB_PAT: mockSecret("gh-tok"),
   GCP_PROJECT_ID: "cloudsql-sv",
   GCP_PROXY_URL: "https://secrets-inventory-gcp-stub.run.app",
   GCP_PROXY_API_KEY: mockSecret("shared-secret-test"),
@@ -46,12 +44,9 @@ afterEach(() => {
 });
 
 describe("GET /api/cloudflare/secrets", () => {
-  it("returns CF secrets list shape", async () => {
+  it("returns CF secrets list shape (via proxy /cf/secrets)", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      Response.json({
-        success: true,
-        result: [{ id: "id-1", name: "A" }],
-      }),
+      Response.json({ secrets: [{ id: "id-1", name: "A" }] }),
     );
     const app = buildApp();
     const res = await app.request("/api/cloudflare/secrets", {}, baseEnv);
@@ -66,10 +61,9 @@ describe("GET /api/cloudflare/secrets", () => {
 });
 
 describe("GET /api/github/secrets", () => {
-  it("returns GitHub secrets list shape", async () => {
+  it("returns GitHub secrets list shape (via proxy /gh/secrets)", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       Response.json({
-        total_count: 1,
         secrets: [
           {
             name: "PAT",
@@ -123,26 +117,21 @@ describe("GET /api/gcp/secrets", () => {
 
 describe("GET /api/all (partial success)", () => {
   it("returns per-provider results and surfaces errors without failing", async () => {
-    // CF と GCP は成功、GitHub だけ 429 で落とす
+    // CF と GCP は成功、GitHub だけ 429 で落とす。proxy URL の path で分岐。
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = typeof input === "string" ? input : input.toString();
-      if (url.includes("api.cloudflare.com")) {
-        return Response.json({
-          success: true,
-          result: [{ id: "id-1", name: "CF1" }],
-        });
+      if (url.includes("/cf/secrets")) {
+        return Response.json({ secrets: [{ id: "id-1", name: "CF1" }] });
       }
-      if (url.includes("api.github.com")) {
+      if (url.includes("/gh/secrets")) {
         return new Response("rate limited", { status: 429 });
       }
-      if (url.includes("secrets-inventory-gcp-stub.run.app")) {
+      if (url.includes("/list-secrets")) {
         return Response.json({
-          secrets: [
-            { name: "GCP1", created_at: "2026-01-01T00:00:00Z" },
-          ],
+          secrets: [{ name: "GCP1", created_at: "2026-01-01T00:00:00Z" }],
         });
       }
-      return new Response("unexpected", { status: 500 });
+      return new Response("unexpected: " + url, { status: 500 });
     });
 
     const app = buildApp();

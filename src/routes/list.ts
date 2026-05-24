@@ -9,28 +9,31 @@ type AppVariables = { cfAccess: CfAccessClaims };
 
 export const listRoutes = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 
+// Refs #45: 3 provider すべて `secrets-inventory-gcp` Cloud Run proxy 経由で
+// 引くようになった。worker が持つ secret binding は `GCP_PROXY_API_KEY` 1 個
+// だけで、proxy URL と shared secret を 3 経路で再利用する。
+
 /** GET /api/cloudflare/secrets — CF Secrets Store のメタデータ一覧 */
 listRoutes.get("/cloudflare/secrets", async (c) => {
-  const token = await c.env.CF_API_TOKEN.get();
+  const apiKey = await c.env.GCP_PROXY_API_KEY.get();
   const result = await listCloudflareSecrets({
-    token,
-    accountId: c.env.CF_ACCOUNT_ID,
-    storeId: c.env.CF_STORE_ID,
+    proxyUrl: c.env.GCP_PROXY_URL,
+    apiKey,
   });
   return c.json({ provider: "cloudflare", secrets: result } satisfies ProviderListResult);
 });
 
 /** GET /api/github/secrets — GitHub org Actions secrets のメタデータ一覧 */
 listRoutes.get("/github/secrets", async (c) => {
-  const token = await c.env.GITHUB_PAT.get();
+  const apiKey = await c.env.GCP_PROXY_API_KEY.get();
   const result = await listGitHubOrgSecrets({
-    token,
-    org: c.env.GITHUB_ORG,
+    proxyUrl: c.env.GCP_PROXY_URL,
+    apiKey,
   });
   return c.json({ provider: "github", secrets: result } satisfies ProviderListResult);
 });
 
-/** GET /api/gcp/secrets — Cloud Run proxy (secrets-inventory-gcp) 経由で GCP Secret Manager メタデータを取得 */
+/** GET /api/gcp/secrets — Cloud Run proxy 経由で GCP Secret Manager メタデータを取得 */
 listRoutes.get("/gcp/secrets", async (c) => {
   const apiKey = await c.env.GCP_PROXY_API_KEY.get();
   const result = await listGcpSecrets({
@@ -45,26 +48,13 @@ listRoutes.get("/gcp/secrets", async (c) => {
  * いずれかが落ちても他は返す (partial success)。
  */
 listRoutes.get("/all", async (c) => {
+  const apiKey = await c.env.GCP_PROXY_API_KEY.get();
+  const proxyUrl = c.env.GCP_PROXY_URL;
+
   const [cf, gh, gcp] = await Promise.allSettled([
-    (async () => {
-      const token = await c.env.CF_API_TOKEN.get();
-      return listCloudflareSecrets({
-        token,
-        accountId: c.env.CF_ACCOUNT_ID,
-        storeId: c.env.CF_STORE_ID,
-      });
-    })(),
-    (async () => {
-      const token = await c.env.GITHUB_PAT.get();
-      return listGitHubOrgSecrets({ token, org: c.env.GITHUB_ORG });
-    })(),
-    (async () => {
-      const apiKey = await c.env.GCP_PROXY_API_KEY.get();
-      return listGcpSecrets({
-        proxyUrl: c.env.GCP_PROXY_URL,
-        apiKey,
-      });
-    })(),
+    listCloudflareSecrets({ proxyUrl, apiKey }),
+    listGitHubOrgSecrets({ proxyUrl, apiKey }),
+    listGcpSecrets({ proxyUrl, apiKey }),
   ]);
 
   const body = {

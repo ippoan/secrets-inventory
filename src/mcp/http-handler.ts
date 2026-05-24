@@ -1,6 +1,7 @@
 import type { Context } from "hono";
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import type { Env } from "../types";
+import type { BindingJwtClaims } from "../middleware/binding-jwt";
 import { createMcpServer } from "./server";
 import { WorkerTransport } from "./transport";
 
@@ -15,7 +16,7 @@ import { WorkerTransport } from "./transport";
 // legacy SSE は endpoint event を 1 発送って即 close する簡易実装に留める
 // (= secrets-rotate-mcp の Phase A と同等の挙動)。
 
-type AppContext = Context<{ Bindings: Env }>;
+type AppContext = Context<{ Bindings: Env; Variables: { bindingJwt: BindingJwtClaims } }>;
 
 const JSON_RPC_PARSE_ERROR = -32700;
 
@@ -37,7 +38,11 @@ async function dispatchOnce(
     );
   }
 
-  const server = createMcpServer(c.env);
+  // binding_jwt middleware が立てた claims を MCP server に渡す。`requiresScope`
+  // を持つ tool (= rotate_secret / create_secret) の scope check に使う。
+  // /mcp* 配下では middleware が必ず立てるが、defensive に undefined fallback。
+  const claims = c.get("bindingJwt") as BindingJwtClaims | undefined;
+  const server = createMcpServer(c.env, claims);
   const transport = new WorkerTransport();
   await server.connect(transport);
 

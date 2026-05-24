@@ -8,6 +8,7 @@ import {
 import { zodToJsonSchema } from "zod-to-json-schema";
 import type { z } from "zod";
 import type { Env } from "../types";
+import type { BindingJwtClaims } from "../middleware/binding-jwt";
 import { GcpUnavailableError } from "../inventory";
 import { listInventoryTool } from "./tools/list-inventory";
 import {
@@ -16,16 +17,24 @@ import {
 } from "./tools/list-service-accounts";
 import { getDriftTool } from "./tools/get-drift";
 import { getSnapshotTool } from "./tools/get-snapshot";
+import { rotateSecretTool, dryRunRotateTool } from "./tools/rotate-secret";
+import { createSecretTool } from "./tools/create-secret";
 
 /**
- * read MCP server で expose する tool 群。`execute` の戻り値は JSON serializable
- * であれば何でも良く、call result の `content[0].text` に stringify されて返る。
+ * MCP tool entry。`requiresScope` を立てた tool は binding_jwt の scope に
+ * その値が含まれていない限り `tools/call` で 403 相当を返す (= write tool は
+ * `mcp.write` scope を要求する `rotate_secret` / `create_secret` に使う)。
+ *
+ * `execute` の 3 引数目 `actorEmail` は binding_jwt の sub から導出した actor
+ * email を渡す (= GCP proxy の actor audit log に転送される)。read tool は
+ * 受け取らないので無視できる。
  */
 interface ToolEntry<S extends z.ZodTypeAny> {
   name: string;
   description: string;
   inputSchema: S;
-  execute: (env: Env, args: z.infer<S>) => Promise<unknown>;
+  requiresScope?: string;
+  execute: (env: Env, args: z.infer<S>, actorEmail?: string) => Promise<unknown>;
 }
 
 // `as ToolEntry<z.ZodTypeAny>` で各 tool の zod schema 型情報を unify する。
@@ -35,6 +44,11 @@ const TOOLS: ToolEntry<z.ZodTypeAny>[] = [
   listServiceAccountsTool as unknown as ToolEntry<z.ZodTypeAny>,
   getDriftTool as unknown as ToolEntry<z.ZodTypeAny>,
   getSnapshotTool as unknown as ToolEntry<z.ZodTypeAny>,
+  // write tools (Refs #45 Stage 2): packages/rotate-mcp から移植。
+  // requiresScope: "mcp.write" で binding_jwt scope check が走る。
+  rotateSecretTool as unknown as ToolEntry<z.ZodTypeAny>,
+  dryRunRotateTool as unknown as ToolEntry<z.ZodTypeAny>,
+  createSecretTool as unknown as ToolEntry<z.ZodTypeAny>,
 ];
 
 /**
@@ -44,8 +58,14 @@ const TOOLS: ToolEntry<z.ZodTypeAny>[] = [
  * SDK 1.x の `Server.setRequestHandler` で `tools/list` と `tools/call` を
  * 登録する。validation は各 tool 内の zod schema で行い、SDK 側の schema
  * mismatch は捕まえない (= SDK 自体は inputSchema を strict には参照しない)。
+ *
+ * `claims` 引数は binding_jwt middleware が `c.get("bindingJwt")` から取り
+ * 出したもの。`scope` field を見て write tool を gate する。
  */
-export function createMcpServer(env: Env): Server {
+export function createMcpServer(env: Env, claims?: BindingJwtClaims): Server {
+  const scopes = parseScopes(claims?.scope);
+  const actorEmail = actorEmailFromClaims(claims);
+
   const server = new Server(
     {
       name: env.MCP_SERVER_NAME,
@@ -59,6 +79,9 @@ export function createMcpServer(env: Env): Server {
   );
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
+    // tools/list は scope に関係なく全 tool の name + schema を返す (= client が
+    // どの tool が存在するか discover できる UX を優先)。scope 不足の tool を
+    // 呼んだら tools/call で 403 相当が返る。
     tools: TOOLS.map((t) => toMcpTool(t)),
   }));
 
@@ -68,13 +91,21 @@ export function createMcpServer(env: Env): Server {
       return errorResult(`unknown tool: ${req.params.name}`);
     }
 
+    if (tool.requiresScope && !scopes.has(tool.requiresScope)) {
+      // MCP spec に 403 は無いので `isError: true` で返す。message には
+      // どの scope が要るかを書いて caller (AI) が認可問題と区別できるようにする。
+      return errorResult(
+        `forbidden: tool ${tool.name} requires scope "${tool.requiresScope}", got "${claims?.scope ?? ""}"`,
+      );
+    }
+
     const parsed = tool.inputSchema.safeParse(req.params.arguments ?? {});
     if (!parsed.success) {
       return errorResult(`invalid arguments: ${parsed.error.message}`);
     }
 
     try {
-      const payload = await tool.execute(env, parsed.data);
+      const payload = await tool.execute(env, parsed.data, actorEmail);
       return successResult(payload);
     } catch (err) {
       return errorResult(toolErrorMessage(err));
@@ -118,6 +149,27 @@ function errorResult(message: string): CallToolResult {
     ],
     isError: true,
   };
+}
+
+/**
+ * `scope` は OAuth 慣例で空白区切り文字列。`"mcp.read mcp.write"` →
+ * `Set("mcp.read", "mcp.write")` 等。claims 未提供 (= local test 等で
+ * middleware を bypass する場合) は空 Set (= write tool は invoke 不可)。
+ */
+function parseScopes(raw: string | undefined): Set<string> {
+  if (!raw) return new Set();
+  return new Set(raw.split(/\s+/).filter((s) => s.length > 0));
+}
+
+/**
+ * `sub` claim から actor email を導出する。auth-worker は sub に GitHub login
+ * を入れているため、そのまま email 風に扱える文字列にはならないが、actor
+ * audit log には十分。github_login が利用できる場合はそちらを優先 (= 人間が
+ * 識別しやすい)。
+ */
+function actorEmailFromClaims(claims: BindingJwtClaims | undefined): string | undefined {
+  if (!claims) return undefined;
+  return claims.github_login || claims.sub || undefined;
 }
 
 /**

@@ -31,14 +31,13 @@ export interface Env {
   CF_ACCESS_TEAM_DOMAIN: string;
   CF_ACCESS_AUD: string;
 
-  // Cloudflare Secrets Store (突合対象)
+  // CF / GitHub の inventory + write も **Cloud Run proxy 経由**に統一
+  // (Refs #45)。worker は CF API token / GitHub PAT を持たず、proxy 側で
+  // GCP Secret Manager から runtime 取得する。worker が持つ secret は
+  // `GCP_PROXY_API_KEY` 1 個だけ。
   CF_ACCOUNT_ID: string;
   CF_STORE_ID: string;
-  CF_API_TOKEN: SecretsStoreSecret;
-
-  // GitHub org secrets (突合対象)
   GITHUB_ORG: string;
-  GITHUB_PAT: SecretsStoreSecret;
 
   // GCP Secret Manager (正) — Cloud Run proxy 経由でアクセス。
   // proxy code は ippoan/secrets-inventory-gcp、SA key は発行しない (ADC)。

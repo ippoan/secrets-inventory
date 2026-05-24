@@ -38,6 +38,10 @@ PR テンプレートは `.github/pull_request_template.md` で `Refs` を強制
   自身は accessor 権限を持たない (viewer のみ)
 - 認証は **Cloudflare Access (Google OAuth)** に委譲。Worker 側は
   `Cf-Access-Jwt-Assertion` を検証するだけで、自前のセッション管理はしない
-- インベントリ自身が読む token (GitHub PAT / GCP SA 鍵 / CF API token) は
-  **Cloudflare Secrets Store binding 経由**で受け取る
-- write 系 (create / update / delete) は追加しない。read 専用に閉じる
+- 3 system すべて **`secrets-inventory-gcp` Cloud Run proxy 経由**でアクセス
+  (Refs #45)。worker が持つ secret binding は `GCP_PROXY_API_KEY` 1 個だけ。
+  CF API token / GitHub PAT は proxy 側 (GCP Secret Manager) に集約
+- write 系 (rotate_secret / create_secret) は MCP tool 経由のみ。tool 単位で
+  `requiresScope: "mcp.write"` を立て、binding_jwt の scope が `mcp.write`
+  を含まないと 403 相当を返す (= 同一 `/mcp` route 上で read/write を分離
+  認可)。Refs #45 Stage 2 で旧 `secrets-rotate-mcp` worker は廃止
