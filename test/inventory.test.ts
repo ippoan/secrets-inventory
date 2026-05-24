@@ -27,29 +27,33 @@ function makeKv(initial: Record<string, string> = {}) {
   };
 }
 
+// Refs #45: 3 provider すべて GCP Cloud Run proxy 経由になったため、
+// `CF_API_TOKEN` / `GITHUB_PAT` の Secrets Store binding は Env から削除。
 function makeEnv(kv: KVNamespace): Env {
   return {
     CF_ACCESS_TEAM_DOMAIN: "team.cloudflareaccess.com",
     CF_ACCESS_AUD: "aud",
     CF_ACCOUNT_ID: "acc",
     CF_STORE_ID: "store",
-    CF_API_TOKEN: mockSecret("cf-tok"),
     GITHUB_ORG: "ippoan",
-    GITHUB_PAT: mockSecret("gh-tok"),
     GCP_PROJECT_ID: "cloudsql-sv",
     GCP_PROXY_URL: "https://gcp-stub.run.app",
     GCP_PROXY_API_KEY: mockSecret("shared-secret"),
     SNAPSHOT_KV: kv,
-    MCP_SERVER_NAME: "secrets-inventory-read-mcp",
-    MCP_SERVER_VERSION: "0.0.1",
+    MCP_SERVER_NAME: "secrets-inventory-mcp",
+    MCP_SERVER_VERSION: "0.0.2",
     MCP_PROTOCOL_VERSION: "2025-03-26",
     AUTH_WORKER_ORIGIN: "https://auth.invalid",
   };
 }
 
 /**
- * fetch mock: URL prefix で各 provider のレスポンスを切り替える。各 case
- * で書きやすいよう、設定 dict ベース。
+ * fetch mock: proxy 経由になったので「同じ proxy URL を path で分岐」する。
+ * - /list-secrets       → GCP
+ * - /gh/secrets         → GitHub
+ * - /cf/secrets         → Cloudflare
+ *
+ * (旧 mock は api.cloudflare.com / api.github.com を見ていた)
  */
 function installFetchMock(handlers: {
   gcp?: () => Response;
@@ -58,22 +62,19 @@ function installFetchMock(handlers: {
 }) {
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
     const url = typeof input === "string" ? input : input.toString();
-    if (url.startsWith("https://gcp-stub.run.app")) {
-      return handlers.gcp
-        ? handlers.gcp()
-        : Response.json({ secrets: [] });
+    if (!url.startsWith("https://gcp-stub.run.app")) {
+      return new Response("unexpected: " + url, { status: 500 });
     }
-    if (url.startsWith("https://api.github.com")) {
-      return handlers.github
-        ? handlers.github()
-        : Response.json({ total_count: 0, secrets: [] });
+    if (url.includes("/list-secrets")) {
+      return handlers.gcp ? handlers.gcp() : Response.json({ secrets: [] });
     }
-    if (url.startsWith("https://api.cloudflare.com")) {
-      return handlers.cloudflare
-        ? handlers.cloudflare()
-        : Response.json({ success: true, result: [] });
+    if (url.includes("/gh/secrets")) {
+      return handlers.github ? handlers.github() : Response.json({ secrets: [] });
     }
-    return new Response("unexpected", { status: 500 });
+    if (url.includes("/cf/secrets")) {
+      return handlers.cloudflare ? handlers.cloudflare() : Response.json({ secrets: [] });
+    }
+    return new Response("unexpected path: " + url, { status: 500 });
   });
 }
 
@@ -98,7 +99,6 @@ describe("gatherInventory — happy path", () => {
         }),
       github: () =>
         Response.json({
-          total_count: 1,
           secrets: [
             {
               name: "A",
@@ -109,8 +109,7 @@ describe("gatherInventory — happy path", () => {
         }),
       cloudflare: () =>
         Response.json({
-          success: true,
-          result: [{ id: "id-b", name: "B" }],
+          secrets: [{ id: "id-b", name: "B" }],
         }),
     });
     const { kv } = makeKv({
@@ -179,9 +178,10 @@ describe("gatherInventory — partial failures", () => {
 
   // Real-world failure mode: SecretsStoreSecret.get() can throw
   // "Secrets Worker: Failed to fetch secret" if the binding's secret name
-  // hasn't been provisioned in the store. Each provider's token fetch +
-  // list call は 1 つの promise にまとめてあるので、ここで throw しても
-  // その provider だけが reject して全体は止まらない。
+  // hasn't been provisioned in the store. Refs #45 で worker が持つ binding は
+  // `GCP_PROXY_API_KEY` の 1 個だけになったので、それが throw すると 3 provider
+  // すべてが影響を受ける = GcpUnavailableError 経路に集約される (旧 CF/GH
+  // 個別 throw test は廃止)。
   function throwingSecret(reason: string): SecretsStoreSecret {
     return {
       get: async () => {
@@ -190,37 +190,7 @@ describe("gatherInventory — partial failures", () => {
     } as unknown as SecretsStoreSecret;
   }
 
-  it("CF token .get() throws → in_cloudflare=null + errors.cloudflare (not 500)", async () => {
-    installFetchMock({
-      gcp: () =>
-        Response.json({
-          secrets: [{ name: "A", created_at: "2026-01-01T00:00:00Z" }],
-        }),
-    });
-    const env = makeEnv(makeKv().kv);
-    env.CF_API_TOKEN = throwingSecret("Secrets Worker: Failed to fetch secret");
-    const result = await gatherInventory(env);
-    expect(result.rows[0]?.in_cloudflare).toBeNull();
-    expect(result.errors.cloudflare).toMatch(/Secrets Worker/);
-    // GitHub の方は無事だったので errors.github は出ない
-    expect(result.errors.github).toBeUndefined();
-  });
-
-  it("GitHub token .get() throws → in_github=null + errors.github (not 500)", async () => {
-    installFetchMock({
-      gcp: () =>
-        Response.json({
-          secrets: [{ name: "A", created_at: "2026-01-01T00:00:00Z" }],
-        }),
-    });
-    const env = makeEnv(makeKv().kv);
-    env.GITHUB_PAT = throwingSecret("Secrets Worker: Failed to fetch secret");
-    const result = await gatherInventory(env);
-    expect(result.rows[0]?.in_github).toBeNull();
-    expect(result.errors.github).toMatch(/Secrets Worker/);
-  });
-
-  it("GCP token .get() throws → GcpUnavailableError (source of truth)", async () => {
+  it("GCP_PROXY_API_KEY .get() throws → GcpUnavailableError (3 provider 共通 binding)", async () => {
     const env = makeEnv(makeKv().kv);
     env.GCP_PROXY_API_KEY = throwingSecret(
       "Secrets Worker: Failed to fetch secret",

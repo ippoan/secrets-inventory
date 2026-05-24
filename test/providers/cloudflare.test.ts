@@ -1,97 +1,28 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import {
-  cfApi,
-  secretsStorePath,
-  CloudflareApiError,
   listCloudflareSecrets,
-  type CfContext,
+  rotateCloudflare,
+  createCloudflare,
+  CloudflareProxyError,
+  type CfProxyContext,
 } from "../../src/providers/cloudflare";
 
-const ctx: CfContext = {
-  token: "test-token",
-  accountId: "acc-123",
-  storeId: "store-456",
+const ctx: CfProxyContext = {
+  proxyUrl: "https://gcp-stub.run.app",
+  apiKey: "shared-secret",
 };
 
-describe("secretsStorePath", () => {
-  it("builds the collection endpoint", () => {
-    expect(secretsStorePath(ctx)).toBe(
-      "/accounts/acc-123/secrets_store/stores/store-456/secrets",
-    );
-  });
-
-  it("builds a single-secret endpoint with suffix", () => {
-    expect(secretsStorePath(ctx, "/abc-id")).toBe(
-      "/accounts/acc-123/secrets_store/stores/store-456/secrets/abc-id",
-    );
-  });
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
-describe("cfApi", () => {
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  it("returns result on success", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      Response.json({ success: true, result: { ok: true } }),
-    );
-    const data = await cfApi<{ ok: boolean }>(ctx, "GET", "/test");
-    expect(data.ok).toBe(true);
-  });
-
-  it("sends bearer token and configured base URL", async () => {
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      Response.json({ success: true, result: [] }),
-    );
-    await cfApi(ctx, "GET", "/x");
-    expect(fetchSpy).toHaveBeenCalledWith(
-      "https://api.cloudflare.com/client/v4/x",
-      expect.objectContaining({
-        method: "GET",
-        headers: expect.objectContaining({
-          Authorization: "Bearer test-token",
-        }),
-      }),
-    );
-  });
-
-  it("throws CloudflareApiError on non-2xx", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response("forbidden", { status: 403 }),
-    );
-    await expect(cfApi(ctx, "GET", "/test")).rejects.toThrow(CloudflareApiError);
-  });
-
-  it("throws when envelope.success=false", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      Response.json({
-        success: false,
-        result: null,
-        errors: [{ code: 7003, message: "Could not route" }],
-      }),
-    );
-    await expect(cfApi(ctx, "GET", "/test")).rejects.toThrow(/7003/);
-  });
-
-  it("falls back to 'unknown' when envelope.success=false has no errors", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      Response.json({ success: false, result: null }),
-    );
-    await expect(cfApi(ctx, "GET", "/test")).rejects.toThrow(/unknown/);
-  });
-});
-
-describe("listCloudflareSecrets", () => {
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  it("maps raw API rows to SecretMetadata without leaking a value field", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      Response.json({
-        success: true,
-        result: [
+describe("listCloudflareSecrets (via proxy)", () => {
+  it("maps proxy rows to SecretMetadata without leaking a value field", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = typeof input === "string" ? input : input.toString();
+      expect(url).toBe("https://gcp-stub.run.app/cf/secrets");
+      return Response.json({
+        secrets: [
           {
             id: "id-1",
             name: "A",
@@ -101,14 +32,10 @@ describe("listCloudflareSecrets", () => {
             created: "2026-01-01T00:00:00Z",
             modified: "2026-01-02T00:00:00Z",
           },
-          {
-            id: "id-2",
-            name: "B",
-            // 欠損 fields に対する fallback を確認
-          },
+          { id: "id-2", name: "B" },
         ],
-      }),
-    );
+      });
+    });
 
     const items = await listCloudflareSecrets(ctx);
     expect(items).toHaveLength(2);
@@ -123,18 +50,129 @@ describe("listCloudflareSecrets", () => {
     }
   });
 
-  it("returns empty array for empty store", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      Response.json({ success: true, result: [] }),
+  it("sends X-Inventory-API-Key header", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json({ secrets: [] }),
     );
-    const items = await listCloudflareSecrets(ctx);
-    expect(items).toEqual([]);
+    await listCloudflareSecrets(ctx);
+    const init = fetchSpy.mock.calls[0]?.[1] as RequestInit | undefined;
+    expect((init?.headers as Record<string, string>)?.["X-Inventory-API-Key"]).toBe(
+      "shared-secret",
+    );
   });
 
-  it("propagates 403 from a read-only token without sufficient scope", async () => {
+  it("throws CloudflareProxyError on non-2xx", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response("forbidden", { status: 403 }),
+      new Response("upstream error", { status: 502 }),
     );
-    await expect(listCloudflareSecrets(ctx)).rejects.toThrow(/403/);
+    await expect(listCloudflareSecrets(ctx)).rejects.toThrow(CloudflareProxyError);
+  });
+});
+
+describe("rotateCloudflare (via proxy)", () => {
+  it("resolves id via list then POSTs /cf/secrets/{id}", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.endsWith("/cf/secrets")) {
+        return Response.json({ secrets: [{ id: "id-target", name: "TARGET" }] });
+      }
+      if (url.endsWith("/cf/secrets/id-target")) {
+        return Response.json({ ok: true, secret_id: "id-target" });
+      }
+      return new Response("unexpected", { status: 500 });
+    });
+
+    const res = await rotateCloudflare({ name: "TARGET", newValue: "new-val" }, ctx);
+    expect(res.status).toBe("ok");
+    expect(res.secret_id).toBe("id-target");
+    const rotateCall = fetchSpy.mock.calls.find(([url]) =>
+      typeof url === "string" && url.endsWith("/cf/secrets/id-target"),
+    );
+    expect(rotateCall).toBeDefined();
+    const body = (rotateCall?.[1] as RequestInit | undefined)?.body as string;
+    expect(body).toContain("new-val");
+  });
+
+  it("fail when secret not found", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json({ secrets: [{ id: "x", name: "OTHER" }] }),
+    );
+    const res = await rotateCloudflare({ name: "MISSING", newValue: "v" }, ctx);
+    expect(res.status).toBe("fail");
+    expect(res.error).toMatch(/not found/i);
+  });
+
+  it("fail when proxy rotate endpoint returns 502", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.endsWith("/cf/secrets")) {
+        return Response.json({ secrets: [{ id: "x", name: "T" }] });
+      }
+      return new Response("oops", { status: 502 });
+    });
+    const res = await rotateCloudflare({ name: "T", newValue: "v" }, ctx);
+    expect(res.status).toBe("fail");
+    expect(res.error).toMatch(/502/);
+  });
+});
+
+describe("createCloudflare (via proxy)", () => {
+  it("creates new secret when name doesn't exist", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.endsWith("/cf/secrets") && init?.method === "GET") {
+        return Response.json({ secrets: [] });
+      }
+      if (url.endsWith("/cf/secrets") && init?.method === "POST") {
+        return Response.json({ ok: true, secret_id: "new-id" });
+      }
+      return new Response("unexpected", { status: 500 });
+    });
+
+    const res = await createCloudflare(
+      { name: "NEW_ONE", initialValue: "v" },
+      ctx,
+    );
+    expect(res.status).toBe("ok");
+    expect(res.created).toBe(true);
+    expect(res.secret_id).toBe("new-id");
+
+    const postCall = fetchSpy.mock.calls.find(
+      ([, init]) => init?.method === "POST",
+    );
+    expect(postCall).toBeDefined();
+    expect(postCall?.[1]?.body as string).toContain("NEW_ONE");
+  });
+
+  it("fail_if_exists=true → fail when name already exists", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json({ secrets: [{ id: "x", name: "DUP" }] }),
+    );
+    const res = await createCloudflare(
+      { name: "DUP", initialValue: "v", failIfExists: true },
+      ctx,
+    );
+    expect(res.status).toBe("fail");
+    expect(res.error).toMatch(/already exists/i);
+  });
+
+  it("fail_if_exists=false → reuse existing (= rotate path) and created=false", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.endsWith("/cf/secrets") && init?.method === "GET") {
+        return Response.json({ secrets: [{ id: "existing-id", name: "DUP" }] });
+      }
+      if (url.endsWith("/cf/secrets/existing-id")) {
+        return Response.json({ ok: true, secret_id: "existing-id" });
+      }
+      return new Response("unexpected", { status: 500 });
+    });
+    const res = await createCloudflare(
+      { name: "DUP", initialValue: "v", failIfExists: false },
+      ctx,
+    );
+    expect(res.status).toBe("ok");
+    expect(res.created).toBe(false);
+    expect(res.secret_id).toBe("existing-id");
   });
 });

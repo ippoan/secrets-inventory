@@ -1,4 +1,4 @@
-import type { SecretMetadata } from "../types";
+import type { Env, SecretMetadata } from "../types";
 
 export class GcpProxyError extends Error {
   constructor(
@@ -13,6 +13,8 @@ export class GcpProxyError extends Error {
 export interface GcpProxyContext {
   proxyUrl: string;
   apiKey: string;
+  /** 操作者 email (actor audit log 用)。read 経路では未使用。 */
+  actorEmail?: string;
 }
 
 /**
@@ -78,4 +80,152 @@ export async function listGcpSecrets(
 export function shortName(fullName: string): string {
   const idx = fullName.lastIndexOf("/");
   return idx >= 0 ? fullName.slice(idx + 1) : fullName;
+}
+
+// ===========================================================================
+// write 系 (= 旧 packages/rotate-mcp の rotateGcp / createGcp を移植)
+// ===========================================================================
+
+export interface GcpRotateArgs {
+  name: string;
+  newValue: string;
+  /** TOCTOU 検証用の現 latest version id (= shortName)。省略可。 */
+  expectedVersionId?: string;
+}
+
+export interface GcpRotateResult {
+  status: "ok" | "fail";
+  new_version?: string;
+  error?: string;
+}
+
+/**
+ * proxy `POST /add-version` を呼んで既存 secret に新 version を投入する。
+ *
+ * `expectedVersionId` 指定時は proxy が TOCTOU check (latest version id 一致
+ * 確認) を実施し、不一致なら 409 を返す。
+ *
+ * 失敗は status="fail" で返し throw しない (= 並列実行で他 provider を巻き込まない)。
+ */
+export async function rotateGcp(
+  args: GcpRotateArgs,
+  ctx: GcpProxyContext,
+): Promise<GcpRotateResult> {
+  const url = `${ctx.proxyUrl}/add-version?name=${encodeURIComponent(args.name)}`;
+  const headers = proxyHeaders(ctx);
+  if (args.expectedVersionId) headers["X-Expected-Version-Id"] = args.expectedVersionId;
+
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ value: args.newValue }),
+    });
+  } catch (err) {
+    return {
+      status: "fail",
+      error: `gcp proxy network: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+  if (!res.ok) {
+    const body = (await res.text()).slice(0, 200);
+    return { status: "fail", error: `gcp proxy ${res.status}: ${body}` };
+  }
+  let parsed: { ok?: boolean; new_version?: string };
+  try {
+    parsed = (await res.json()) as typeof parsed;
+  } catch (err) {
+    return {
+      status: "fail",
+      error: `gcp proxy bad json: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+  if (!parsed.ok || typeof parsed.new_version !== "string") {
+    return { status: "fail", error: "gcp proxy returned ok=false or missing new_version" };
+  }
+  return { status: "ok", new_version: parsed.new_version };
+}
+
+export interface GcpCreateArgs {
+  name: string;
+  initialValue: string;
+  /** true (default) で既存 name 衝突は 409 → fail。false で既存再利用 (= 新 version 投入)。 */
+  failIfExists?: boolean;
+}
+
+export interface GcpCreateResult extends GcpRotateResult {
+  /** 新規作成 = true、既存再利用 = false。 */
+  created?: boolean;
+}
+
+/**
+ * proxy `POST /create-secret` を呼んで新 secret + 初版を投入する。
+ */
+export async function createGcp(
+  args: GcpCreateArgs,
+  ctx: GcpProxyContext,
+): Promise<GcpCreateResult> {
+  const url = `${ctx.proxyUrl}/create-secret?name=${encodeURIComponent(args.name)}`;
+  const failIfExists = args.failIfExists ?? true;
+  const headers = proxyHeaders(ctx);
+  headers["X-Fail-If-Exists"] = failIfExists ? "true" : "false";
+
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ value: args.initialValue }),
+    });
+  } catch (err) {
+    return {
+      status: "fail",
+      error: `gcp proxy network: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+  if (res.status === 409) {
+    return { status: "fail", error: "gcp secret already exists" };
+  }
+  if (!res.ok) {
+    const body = (await res.text()).slice(0, 200);
+    return { status: "fail", error: `gcp proxy ${res.status}: ${body}` };
+  }
+  let parsed: { ok?: boolean; new_version?: string; created?: boolean };
+  try {
+    parsed = (await res.json()) as typeof parsed;
+  } catch (err) {
+    return {
+      status: "fail",
+      error: `gcp proxy bad json: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+  if (!parsed.ok || typeof parsed.new_version !== "string") {
+    return { status: "fail", error: "gcp proxy returned ok=false or missing new_version" };
+  }
+  return {
+    status: "ok",
+    new_version: parsed.new_version,
+    created: parsed.created === true,
+  };
+}
+
+function proxyHeaders(ctx: GcpProxyContext): Record<string, string> {
+  const h: Record<string, string> = {
+    "X-Inventory-API-Key": ctx.apiKey,
+    "Content-Type": "application/json",
+    Accept: "application/json",
+    "User-Agent": "secrets-inventory",
+  };
+  if (ctx.actorEmail) h["X-Actor-Email"] = ctx.actorEmail;
+  return h;
+}
+
+/** Env から proxy ctx を組み立てる helper。 */
+export async function gcpProxyCtxFromEnv(
+  env: Env,
+  actorEmail?: string,
+): Promise<GcpProxyContext> {
+  const apiKey = await env.GCP_PROXY_API_KEY.get();
+  return { proxyUrl: env.GCP_PROXY_URL, apiKey, actorEmail };
 }

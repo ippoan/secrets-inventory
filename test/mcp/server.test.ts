@@ -48,15 +48,16 @@ describe("MCP server (read MCP)", () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(
       async (input: RequestInfo | URL) => {
         const url = typeof input === "string" ? input : input.toString();
-        // すべての provider fetch を空の成功 response にする (= row 0 件)
-        if (url.includes("gcp-stub.run.app")) {
+        // すべての provider fetch を空の成功 response にする (= row 0 件)。
+        // Refs #45 で 3 provider すべて GCP proxy 経由 path-routing になった。
+        if (url.includes("/list-secrets")) {
           return Response.json({ secrets: [] });
         }
-        if (url.includes("api.github.com")) {
+        if (url.includes("/gh/secrets")) {
           return Response.json({ secrets: [] });
         }
-        if (url.includes("api.cloudflare.com")) {
-          return Response.json({ result: [], success: true });
+        if (url.includes("/cf/secrets")) {
+          return Response.json({ secrets: [] });
         }
         throw new Error(`unexpected fetch in mcp server test: ${url}`);
       },
@@ -78,23 +79,26 @@ describe("MCP server (read MCP)", () => {
       protocolVersion: string;
       capabilities: { tools?: unknown };
     };
-    expect(result.serverInfo.name).toBe("secrets-inventory-read-mcp");
-    expect(result.serverInfo.version).toBe("0.0.1");
+    expect(result.serverInfo.name).toBe("secrets-inventory-mcp");
+    expect(result.serverInfo.version).toBe("0.0.2");
     expect(result.protocolVersion).toBe("2025-03-26");
     expect(result.capabilities.tools).toBeDefined();
   });
 
-  it("tools/list returns all 4 read tools with JSON schemas", async () => {
+  it("tools/list returns all 7 tools (4 read + 3 write) with JSON schemas", async () => {
     const res = await rpc(env(), { method: "tools/list" });
     const result = res.result as {
       tools: Array<{ name: string; description: string; inputSchema: unknown }>;
     };
     const names = result.tools.map((t) => t.name).sort();
     expect(names).toEqual([
+      "create_secret",
+      "dry_run_rotate",
       "get_drift",
       "get_snapshot",
       "list_inventory",
       "list_service_accounts",
+      "rotate_secret",
     ]);
     for (const t of result.tools) {
       expect(t.description.length).toBeGreaterThan(0);
@@ -183,18 +187,17 @@ describe("MCP server (read MCP)", () => {
   it("get_drift filters rows where in_github=false or in_cloudflare=false", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = typeof input === "string" ? input : input.toString();
-      if (url.includes("gcp-stub.run.app")) {
+      if (url.includes("/list-secrets")) {
         return Response.json({
           secrets: [{ name: "ONLY_GCP" }, { name: "EVERYWHERE" }],
         });
       }
-      if (url.includes("api.github.com")) {
+      if (url.includes("/gh/secrets")) {
         return Response.json({ secrets: [{ name: "EVERYWHERE" }] });
       }
-      if (url.includes("api.cloudflare.com")) {
+      if (url.includes("/cf/secrets")) {
         return Response.json({
-          result: [{ id: "x", name: "EVERYWHERE" }],
-          success: true,
+          secrets: [{ id: "x", name: "EVERYWHERE" }],
         });
       }
       throw new Error(`unexpected: ${url}`);

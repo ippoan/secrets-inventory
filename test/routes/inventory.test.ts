@@ -30,9 +30,7 @@ const baseEnv: Env = {
   CF_ACCESS_AUD: "aud",
   CF_ACCOUNT_ID: "acc",
   CF_STORE_ID: "store",
-  CF_API_TOKEN: mockSecret("cf-tok"),
   GITHUB_ORG: "ippoan",
-  GITHUB_PAT: mockSecret("gh-tok"),
   GCP_PROJECT_ID: "cloudsql-sv",
   GCP_PROXY_URL: "https://gcp-stub.run.app",
   GCP_PROXY_API_KEY: mockSecret("shared"),
@@ -61,16 +59,16 @@ describe("GET /api/inventory", () => {
   it("returns 200 + reconciled body when all providers OK", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = typeof input === "string" ? input : input.toString();
-      if (url.startsWith("https://gcp-stub.run.app")) {
+      if (url.includes("/list-secrets")) {
         return Response.json({
           secrets: [{ name: "STRIPE_API_KEY", created_at: "2026-01-01T00:00:00Z" }],
         });
       }
-      if (url.startsWith("https://api.github.com")) {
-        return Response.json({ total_count: 0, secrets: [] });
+      if (url.includes("/gh/secrets")) {
+        return Response.json({ secrets: [] });
       }
-      if (url.startsWith("https://api.cloudflare.com")) {
-        return Response.json({ success: true, result: [] });
+      if (url.includes("/cf/secrets")) {
+        return Response.json({ secrets: [] });
       }
       return new Response("?", { status: 500 });
     });
@@ -90,16 +88,16 @@ describe("GET /api/inventory", () => {
   it("?commit=1 writes a fresh snapshot to KV", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = typeof input === "string" ? input : input.toString();
-      if (url.startsWith("https://gcp-stub.run.app")) {
+      if (url.includes("/list-secrets")) {
         return Response.json({
           secrets: [{ name: "A", created_at: "2026-01-01T00:00:00Z" }],
         });
       }
-      if (url.startsWith("https://api.github.com")) {
-        return Response.json({ total_count: 0, secrets: [] });
+      if (url.includes("/gh/secrets")) {
+        return Response.json({ secrets: [] });
       }
-      if (url.startsWith("https://api.cloudflare.com")) {
-        return Response.json({ success: true, result: [] });
+      if (url.includes("/cf/secrets")) {
+        return Response.json({ secrets: [] });
       }
       return new Response("?", { status: 500 });
     });
@@ -118,7 +116,7 @@ describe("GET /api/inventory", () => {
   it("returns 502 when GCP fetch fails (source of truth)", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = typeof input === "string" ? input : input.toString();
-      if (url.startsWith("https://gcp-stub.run.app")) {
+      if (url.includes("/list-secrets")) {
         return new Response("upstream", { status: 503 });
       }
       return Response.json({});
@@ -133,16 +131,16 @@ describe("GET /api/inventory", () => {
   it("returns 200 with errors.github when only GitHub fails (partial)", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = typeof input === "string" ? input : input.toString();
-      if (url.startsWith("https://gcp-stub.run.app")) {
+      if (url.includes("/list-secrets")) {
         return Response.json({
           secrets: [{ name: "A", created_at: "2026-01-01T00:00:00Z" }],
         });
       }
-      if (url.startsWith("https://api.github.com")) {
+      if (url.includes("/gh/secrets")) {
         return new Response("unauth", { status: 401 });
       }
-      if (url.startsWith("https://api.cloudflare.com")) {
-        return Response.json({ success: true, result: [] });
+      if (url.includes("/cf/secrets")) {
+        return Response.json({ secrets: [] });
       }
       return new Response("?", { status: 500 });
     });
