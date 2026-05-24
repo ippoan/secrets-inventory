@@ -36,7 +36,7 @@ describe("handleMcpRequest", () => {
     expect(res.result).toEqual({});
   });
 
-  it("returns 2 tools on tools/list", async () => {
+  it("returns 3 tools on tools/list", async () => {
     const res = await handleMcpRequest(
       { jsonrpc: "2.0", id: 3, method: "tools/list" },
       env,
@@ -46,6 +46,7 @@ describe("handleMcpRequest", () => {
     expect(result.tools.map((t) => t.name)).toEqual([
       "rotate_secret",
       "dry_run_rotate",
+      "create_secret",
     ]);
   });
 
