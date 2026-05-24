@@ -259,7 +259,7 @@ describe("POST /mcp/sse/message (Legacy SSE)", () => {
     const body = (await res.json()) as {
       result: { tools: Array<{ name: string }> };
     };
-    expect(body.result.tools.length).toBe(2);
+    expect(body.result.tools.length).toBe(3);
   });
 
   it("returns 400 on parse error", async () => {

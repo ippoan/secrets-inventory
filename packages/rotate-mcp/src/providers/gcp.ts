@@ -1,13 +1,16 @@
 import type { Env, RotateSecretProviderResult } from "../types";
 
-// GCP provider: secrets-inventory-gcp Cloud Run proxy 経由で
-// `POST /add-version?name=<n>` を叩く。proxy が ADC で Secret Manager に
-// AddSecretVersion を委譲。Worker 自身は GCP credential を持たない (= shared
-// API key だけ送る) ので、CF Secrets Store binding 経由で `GCP_PROXY_API_KEY`
-// を受け取る。
+// GCP provider: secrets-inventory-gcp Cloud Run proxy 経由で:
+//   - `POST /add-version?name=<n>` (rotate_secret = 既存 secret 新 version)
+//   - `POST /create-secret?name=<n>` (create_secret = 新 secret + 初版)
+//
+// どちらも proxy が ADC で Secret Manager に委譲。Worker 自身は GCP
+// credential を持たない (= shared API key だけ送る) ので、CF Secrets Store
+// binding 経由で `GCP_PROXY_API_KEY` を受け取る。
 //
 // 値は body の `value` field のみで運び、log / response に echo しない。
-// proxy 側でも同様に enforce している (= ippoan/secrets-inventory-gcp PR #23)。
+// proxy 側でも同様に enforce している (= ippoan/secrets-inventory-gcp
+// PR #23 / #24)。
 
 export interface GcpRotateArgs {
   name: string;
@@ -96,5 +99,97 @@ export async function rotateGcp(
   return {
     status: "ok",
     new_version: parsed.new_version,
+  };
+}
+
+// ===========================================================================
+// create_secret 用 (POST /create-secret)
+// ===========================================================================
+
+export interface GcpCreateArgs {
+  name: string;
+  initialValue: string;
+  /** false で既存 secret 再利用 (= 新 version 投入)。default true (= 409). */
+  failIfExists?: boolean;
+  /** actor email (audit log 用)。省略可。 */
+  actorEmail?: string;
+}
+
+interface ProxyCreateSecretResponse {
+  ok: boolean;
+  name: string;
+  created: boolean;
+  new_version: string;
+}
+
+export interface GcpCreateResult extends RotateSecretProviderResult {
+  /** 新規作成 = true、既存再利用 = false。conflict (409) は status="fail" 経路。 */
+  created?: boolean;
+}
+
+/**
+ * `POST /create-secret` を呼ぶ。failIfExists=true (default) で既存 name は
+ * 409 → status="fail" + error="already exists" を返す。failIfExists=false で
+ * 既存再利用 → status="ok" + created=false。
+ */
+export async function createGcp(
+  args: GcpCreateArgs,
+  deps: GcpDeps,
+): Promise<GcpCreateResult> {
+  const { env } = deps;
+  const fetcher = deps.fetcher ?? fetch;
+
+  const apiKey = await env.GCP_PROXY_API_KEY.get();
+  const url = `${env.GCP_PROXY_URL}/create-secret?name=${encodeURIComponent(args.name)}`;
+
+  const failIfExists = args.failIfExists ?? true;
+  const headers: Record<string, string> = {
+    "X-Inventory-API-Key": apiKey,
+    "Content-Type": "application/json",
+    Accept: "application/json",
+    "User-Agent": "secrets-rotate-mcp",
+    "X-Fail-If-Exists": failIfExists ? "true" : "false",
+  };
+  if (args.actorEmail) headers["X-Actor-Email"] = args.actorEmail;
+
+  let res: Response;
+  try {
+    res = await fetcher(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ value: args.initialValue }),
+    });
+  } catch (err) {
+    return {
+      status: "fail",
+      error: `network error: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+
+  if (res.status === 409) {
+    return { status: "fail", error: "gcp secret already exists" };
+  }
+  if (!res.ok) {
+    const body = (await res.text()).slice(0, 200);
+    return { status: "fail", error: `gcp proxy ${res.status}: ${body}` };
+  }
+
+  let parsed: ProxyCreateSecretResponse;
+  try {
+    parsed = (await res.json()) as ProxyCreateSecretResponse;
+  } catch (err) {
+    return {
+      status: "fail",
+      error: `gcp proxy bad json: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+  if (!parsed.ok || typeof parsed.new_version !== "string") {
+    return { status: "fail", error: "gcp proxy returned ok=false or missing new_version" };
+  }
+
+  return {
+    status: "ok",
+    new_version: parsed.new_version,
+    created: parsed.created,
   };
 }

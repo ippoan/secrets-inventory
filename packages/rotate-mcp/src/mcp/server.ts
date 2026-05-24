@@ -12,8 +12,11 @@ import {
 import {
   rotateSecretTool,
   dryRunRotateTool,
+  createSecretTool,
   validateRotateSecretArgs,
+  validateCreateSecretArgs,
   executeRotateSecret,
+  executeCreateSecret,
   executeRotateSecretMock,
   validationError,
   type ExecuteOptions,
@@ -64,7 +67,7 @@ export async function handleMcpRequest(
 
       case "tools/list":
         return makeSuccess(id, {
-          tools: [rotateSecretTool, dryRunRotateTool],
+          tools: [rotateSecretTool, dryRunRotateTool, createSecretTool],
         });
 
       case "tools/call":
@@ -108,6 +111,18 @@ async function handleToolsCall(
         actorEmail: options.actorEmail,
       };
       const result = await executeRotateSecret(validated.args, env, execOpts);
+      return makeSuccess(id, toolCallResult(result));
+    }
+    case "create_secret": {
+      const validated = validateCreateSecretArgs(params.arguments);
+      if (!validated.ok) {
+        return validationError(id, validated.error);
+      }
+      const execOpts: ExecuteOptions = {
+        fetcher: options.fetcher,
+        actorEmail: options.actorEmail,
+      };
+      const result = await executeCreateSecret(validated.args, env, execOpts);
       return makeSuccess(id, toolCallResult(result));
     }
     case "dry_run_rotate": {

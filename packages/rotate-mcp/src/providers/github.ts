@@ -166,3 +166,83 @@ function bytesToBase64(bytes: Uint8Array): string {
   for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
   return btoa(bin);
 }
+
+// ===========================================================================
+// create_secret 用
+// ===========================================================================
+
+export interface GhCreateArgs {
+  name: string;
+  initialValue: string;
+  /** false で既存 secret 再利用 (PUT は冪等)。default true (= 409). */
+  failIfExists?: boolean;
+  visibility?: "all" | "private" | "selected";
+}
+
+export interface GhCreateResult extends RotateSecretProviderResult {
+  /** 新規作成 = true、既存上書き = false (fail_if_exists=false で再利用時)。 */
+  created?: boolean;
+}
+
+/**
+ * GitHub Actions org secret 新規作成。GitHub の `PUT` は冪等で create + update
+ * の両方を兼ねるため、failIfExists=true のときだけ事前 `GET /actions/secrets/
+ * {name}` で 404 確認を入れる:
+ *   - 404 → 存在しない → PUT で create、created=true
+ *   - 200 → 既存 → status="fail" + "already exists"
+ *   - その他 → status="fail" (auth / network)
+ *
+ * failIfExists=false なら GET 飛ばして即 PUT (= 上書き)、created=false。
+ */
+export async function createGithub(
+  args: GhCreateArgs,
+  deps: GhDeps,
+): Promise<GhCreateResult> {
+  const { env } = deps;
+  const fetcher = deps.fetcher ?? fetch;
+  const token = await env.GITHUB_PAT.get();
+
+  const org = encodeURIComponent(env.GITHUB_ORG);
+  const name = encodeURIComponent(args.name);
+  const failIfExists = args.failIfExists ?? true;
+
+  // step 1: 既存確認 (failIfExists=true のみ)
+  if (failIfExists) {
+    let getRes: Response;
+    try {
+      getRes = await fetcher(`${GITHUB_API}/orgs/${org}/actions/secrets/${name}`, {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: "application/vnd.github+json",
+          "X-GitHub-Api-Version": "2022-11-28",
+          "User-Agent": "secrets-rotate-mcp",
+        },
+      });
+    } catch (err) {
+      return {
+        status: "fail",
+        error: `github get network error: ${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
+    if (getRes.status === 200) {
+      return { status: "fail", error: "github secret already exists" };
+    }
+    if (getRes.status !== 404) {
+      const body = (await getRes.text()).slice(0, 200);
+      return { status: "fail", error: `github get ${getRes.status}: ${body}` };
+    }
+  }
+
+  // step 2: PUT (rotateGithub と同じ encrypt + put 処理)
+  const result = await rotateGithub(
+    {
+      name: args.name,
+      newValue: args.initialValue,
+      visibility: args.visibility,
+    },
+    deps,
+  );
+  if (result.status !== "ok") return result;
+  return { ...result, created: failIfExists };
+}
