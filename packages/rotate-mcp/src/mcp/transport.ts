@@ -34,7 +34,9 @@ export async function streamableHttpPost(c: AppContext): Promise<Response> {
     return c.json(makeError(null, JSON_RPC_PARSE_ERROR, message), 400);
   }
 
-  const response = await handleMcpRequest(body, c.env);
+  const response = await handleMcpRequest(body, c.env, {
+    actorEmail: c.get("cfAccess")?.email,
+  });
 
   if (response === null) {
     // notification: spec 上 response 無し
@@ -87,7 +89,9 @@ export async function legacySsePost(c: AppContext): Promise<Response> {
     const message = err instanceof Error ? err.message : String(err);
     return c.json(makeError(null, JSON_RPC_PARSE_ERROR, message), 400);
   }
-  const response = await handleMcpRequest(body, c.env);
+  const response = await handleMcpRequest(body, c.env, {
+    actorEmail: c.get("cfAccess")?.email,
+  });
   if (response === null) {
     return new Response(null, { status: 202 });
   }

@@ -7,24 +7,50 @@
   "observability": {
     "enabled": true
   },
-  // Phase A 骨格: tool は mock 実装、実 write はしない。
+  // Phase B: 実 write 接続。tool は 3 provider (GCP proxy / CF API / GitHub
+  // libsodium) に対して real call を行う。
   //
+  // 認証:
   // - CF Access (Google OAuth) で edge 認証 → JWT を `Cf-Access-Jwt-Assertion`
   //   で worker に到達。secrets-inventory worker と同じ team_domain / aud を
   //   再利用する (同じ CF Access Application で保護する想定)。
   // - tool 呼び出しは Bearer (Secrets Store binding `ROTATE_MCP_BEARER`) で
-  //   二重認証。30-day rotation 想定 (rotation 自体は Phase B 以降で
-  //   `rotate_secret` 自己呼び出しで dogfooding 化)。
-  // - Phase A 時点では実書き込み先 (GCP proxy / CF API / GitHub) との binding
-  //   は無し。Phase B で `secrets-inventory-gcp` proxy 経由の GCP write、
-  //   CF API token (Secrets Store rotate scope)、GitHub PAT (write scope) を
-  //   追加する。
+  //   二重認証。30-day rotation 想定 (= 本 MCP 自身の rotate_secret で
+  //   dogfooding 化可能)。
+  //
+  // Bindings (write provider):
+  // - GCP_PROXY_API_KEY: secrets-inventory-gcp Cloud Run proxy への shared
+  //   secret (= secrets-inventory worker と同じ secret を流用、kebab-case)。
+  //   proxy は POST /add-version endpoint を 1 つ提供 (= ippoan/secrets-
+  //   inventory-gcp PR #23)。
+  // - CF_API_TOKEN: CF API token (Secrets Store Edit scope 必要)。read 専用
+  //   worker の token (read scope) とは **別 token** にすべき (= scope を
+  //   write に絞った専用 token を発行して別 store key に格納)。
+  // - GITHUB_PAT: GitHub fine-grained PAT (organization secrets: write scope
+  //   必要)。read 専用 worker の token (read scope) とは別 token。
+  //
+  // secrets.required で CI / GCP Secret Manager 側にも対応 secret が存在する
+  // ことを verify する。`*-write` suffix は read 用 token (`*-read`) と並列
+  // しても衝突しないよう。
   "vars": {
     "CF_ACCESS_TEAM_DOMAIN": "mtamaramu.cloudflareaccess.com",
     "CF_ACCESS_AUD": "7cdf1cb650bc61c5827070e2a9df96166362f7c36934bcc5bf271c738af99b3f",
     "MCP_SERVER_NAME": "secrets-rotate-mcp",
-    "MCP_SERVER_VERSION": "0.0.1",
-    "MCP_PROTOCOL_VERSION": "2025-03-26"
+    "MCP_SERVER_VERSION": "0.0.2",
+    "MCP_PROTOCOL_VERSION": "2025-03-26",
+    "GCP_PROJECT_ID": "cloudsql-sv",
+    "GCP_PROXY_URL": "https://secrets-inventory-gcp-staging-566bls5vfq-an.a.run.app",
+    "CF_ACCOUNT_ID": "24b45709d060d957340180e995f0d373",
+    "CF_STORE_ID": "bd7bc91a3e5f4111add4acf6cb4b8733",
+    "GITHUB_ORG": "ippoan"
+  },
+  "secrets": {
+    "required": [
+      "rotate-mcp-bearer",
+      "secrets-inventory-gcp-proxy-api-key",
+      "cf-secrets-inventory-secrets-store-write",
+      "gh-secrets-inventory-org-secrets-write"
+    ]
   },
   "env": {
     "staging": {
@@ -36,14 +62,34 @@
         "CF_ACCESS_TEAM_DOMAIN": "mtamaramu.cloudflareaccess.com",
         "CF_ACCESS_AUD": "7cdf1cb650bc61c5827070e2a9df96166362f7c36934bcc5bf271c738af99b3f",
         "MCP_SERVER_NAME": "secrets-rotate-mcp",
-        "MCP_SERVER_VERSION": "0.0.1",
-        "MCP_PROTOCOL_VERSION": "2025-03-26"
+        "MCP_SERVER_VERSION": "0.0.2",
+        "MCP_PROTOCOL_VERSION": "2025-03-26",
+        "GCP_PROJECT_ID": "cloudsql-sv",
+        "GCP_PROXY_URL": "https://secrets-inventory-gcp-staging-566bls5vfq-an.a.run.app",
+        "CF_ACCOUNT_ID": "24b45709d060d957340180e995f0d373",
+        "CF_STORE_ID": "bd7bc91a3e5f4111add4acf6cb4b8733",
+        "GITHUB_ORG": "ippoan"
       },
       "secrets_store_secrets": [
         {
           "binding": "ROTATE_MCP_BEARER",
           "store_id": "bd7bc91a3e5f4111add4acf6cb4b8733",
           "secret_name": "rotate-mcp-bearer"
+        },
+        {
+          "binding": "GCP_PROXY_API_KEY",
+          "store_id": "bd7bc91a3e5f4111add4acf6cb4b8733",
+          "secret_name": "secrets-inventory-gcp-proxy-api-key"
+        },
+        {
+          "binding": "CF_API_TOKEN",
+          "store_id": "bd7bc91a3e5f4111add4acf6cb4b8733",
+          "secret_name": "cf-secrets-inventory-secrets-store-write"
+        },
+        {
+          "binding": "GITHUB_PAT",
+          "store_id": "bd7bc91a3e5f4111add4acf6cb4b8733",
+          "secret_name": "gh-secrets-inventory-org-secrets-write"
         }
       ]
     }

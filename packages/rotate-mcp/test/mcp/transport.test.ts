@@ -6,19 +6,16 @@ import {
 } from "../../src/mcp/transport";
 import type { Context } from "hono";
 import type { Env, AppVariables } from "../../src/types";
+import { makeTestEnv } from "../helpers/env";
 
 // transport handlers を Hono の `app.request()` 経由ではなく **stub Context** で
 // 直接呼ぶ unit test。`c.req.json()` が non-Error reject する case や、
 // legacy SSE GET の `c` パラメータが未使用であることを確認する。
 
-const env: Env = {
+const env = makeTestEnv({
   CF_ACCESS_TEAM_DOMAIN: "x.cloudflareaccess.com",
   CF_ACCESS_AUD: "aud",
-  MCP_SERVER_NAME: "secrets-rotate-mcp",
-  MCP_SERVER_VERSION: "0.0.1",
-  MCP_PROTOCOL_VERSION: "2025-03-26",
-  ROTATE_MCP_BEARER: { get: async () => "x" },
-};
+});
 
 function stubContext(jsonReject: unknown): Context<{
   Bindings: Env;
@@ -31,6 +28,7 @@ function stubContext(jsonReject: unknown): Context<{
         throw jsonReject;
       },
     },
+    get: (_key: string) => undefined, // cfAccess 等 Variables の getter
     json: (body: unknown, status?: number) =>
       new Response(JSON.stringify(body), {
         status: status ?? 200,

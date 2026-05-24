@@ -16,8 +16,10 @@ describe("rotate_secret tool schema", () => {
       "new_value",
       "confirm_name",
     ]);
+    // Phase B: SCREAMING_SNAKE + kebab-case 両許可 (= 親 repo
+    // secrets.required の実運用 naming と一致)。
     expect(rotateSecretTool.inputSchema.properties.name.pattern).toBe(
-      "^[A-Z][A-Z0-9_]{0,127}$",
+      "^[A-Za-z][A-Za-z0-9_-]{0,127}$",
     );
   });
 
@@ -46,13 +48,38 @@ describe("validateRotateSecretArgs", () => {
     expect(validateRotateSecretArgs("str").ok).toBe(false);
   });
 
-  it("rejects bad name pattern (lowercase)", () => {
-    const r = validateRotateSecretArgs({ ...valid, name: "my_secret" });
-    expect(r.ok).toBe(false);
+  it("accepts kebab-case name (Phase B relaxation)", () => {
+    // 親 repo secrets.required の実運用 naming (kebab-case) を rotate できる
+    // ことを固定する。Phase A 以前は SCREAMING_SNAKE 専用だった。
+    const r = validateRotateSecretArgs({
+      ...valid,
+      name: "cf-secrets-inventory-secrets-store-read",
+      confirm_name: "cf-secrets-inventory-secrets-store-read",
+    });
+    expect(r.ok).toBe(true);
+  });
+
+  it("accepts lowercase name", () => {
+    const r = validateRotateSecretArgs({
+      ...valid,
+      name: "my_secret",
+      confirm_name: "my_secret",
+    });
+    expect(r.ok).toBe(true);
   });
 
   it("rejects bad name pattern (starts with digit)", () => {
     const r = validateRotateSecretArgs({ ...valid, name: "1NAME" });
+    expect(r.ok).toBe(false);
+  });
+
+  it("rejects bad name pattern (starts with underscore)", () => {
+    const r = validateRotateSecretArgs({ ...valid, name: "_NAME" });
+    expect(r.ok).toBe(false);
+  });
+
+  it("rejects bad name pattern (contains dot)", () => {
+    const r = validateRotateSecretArgs({ ...valid, name: "foo.bar" });
     expect(r.ok).toBe(false);
   });
 

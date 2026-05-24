@@ -1,6 +1,6 @@
 {
   "name": "secrets-rotate-mcp",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "private": true,
   "type": "module",
   "scripts": {
@@ -19,6 +19,8 @@
   },
   "dependencies": {
     "hono": "^4.12.12",
-    "jose": "^5.10.0"
+    "jose": "^5.10.0",
+    "tweetnacl": "^1.0.3",
+    "tweetnacl-sealedbox-js": "^1.2.0"
   }
 }

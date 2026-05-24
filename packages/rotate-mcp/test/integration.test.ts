@@ -28,13 +28,27 @@ function mockSecret(value: string): SecretsStoreSecret {
   return { get: async () => value };
 }
 
+// Phase B 以降は test/helpers/env.ts の makeTestEnv() を使うが、ここは
+// CF Access JWT 検証フローを通すため `TEAM` / `AUD` を closure 経由で
+// テスト中に注入する必要があり、本ファイル内に literal を残す。
 const env: Env = {
   CF_ACCESS_TEAM_DOMAIN: TEAM,
   CF_ACCESS_AUD: AUD,
   MCP_SERVER_NAME: "secrets-rotate-mcp",
-  MCP_SERVER_VERSION: "0.0.1",
+  MCP_SERVER_VERSION: "0.0.2",
   MCP_PROTOCOL_VERSION: "2025-03-26",
   ROTATE_MCP_BEARER: mockSecret(BEARER),
+
+  GCP_PROJECT_ID: "test-project",
+  GCP_PROXY_URL: "https://gcp-proxy.example.invalid",
+  GCP_PROXY_API_KEY: mockSecret("test-gcp-key"),
+
+  CF_ACCOUNT_ID: "test-cf-account",
+  CF_STORE_ID: "test-cf-store",
+  CF_API_TOKEN: mockSecret("test-cf-token"),
+
+  GITHUB_ORG: "test-org",
+  GITHUB_PAT: mockSecret("test-gh-pat"),
 };
 
 beforeEach(async () => {
@@ -69,7 +83,7 @@ describe("/health", () => {
     expect(await res.json()).toEqual({
       ok: true,
       name: "secrets-rotate-mcp",
-      version: "0.0.1",
+      version: "0.0.2",
       protocol: "2025-03-26",
     });
   });
