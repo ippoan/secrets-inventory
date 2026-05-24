@@ -7,6 +7,10 @@
   "observability": {
     "enabled": true
   },
+  // top-level は `wrangler dev` (= local dev) 用。実 deploy は env.staging で
+  // 行う (= 親 repo CLAUDE.md の「staging を実運用環境とする」と同じ pattern。
+  // 既存 read worker secrets-inventory も同構造)。custom domain は staging env
+  // 側にだけ bind する。
   // Phase B: 実 write 接続。tool は 3 provider (GCP proxy / CF API / GitHub
   // libsodium) に対して real call を行う。
   //
@@ -56,7 +60,22 @@
     "staging": {
       "name": "secrets-rotate-mcp-staging",
       "account_id": "24b45709d060d957340180e995f0d373",
-      "workers_dev": true,
+      // staging = 実 prod 運用。custom domain `security-rotate.ippoan.org` を
+      // bind (= 既存 read worker `security-inventory.ippoan.org` と同 zone /
+      // 同 CF Access app pattern)。workers_dev は明示 false で *.workers.dev
+      // subdomain を無効化 (= URL を 1 本に絞り誤接続防止 + Access 適用漏れ
+      // 防止)。
+      //
+      // CF Access application で同 hostname を保護する設定は user が CF
+      // dashboard で追加する必要あり (= AUD は既存 secrets-inventory app と
+      // 共通の `7cdf1cb6...` を流用、両 worker が 1 つの app 配下)。
+      "workers_dev": false,
+      "routes": [
+        {
+          "pattern": "security-rotate.ippoan.org",
+          "custom_domain": true
+        }
+      ],
       "observability": { "enabled": true },
       "vars": {
         "CF_ACCESS_TEAM_DOMAIN": "mtamaramu.cloudflareaccess.com",
