@@ -9,7 +9,8 @@
   },
   // staging を実運用 env として扱う。CF Access Application は CF Zero Trust
   // dashboard で作成済み (team domain mtamaramu、AUD は下記)。Google OAuth
-  // IdP 経由で `/api/*` を保護する。
+  // IdP 経由で `/api/*` (= browser dashboard 系) を保護する。`/mcp*` は
+  // edge で bypassAll に設定し、auth-worker OAuth (binding_jwt) で代替 (#43)。
   //
   // GCP は Cloud Run proxy (ippoan/secrets-inventory-gcp) 経由でアクセス。
   // `GCP_PROXY_URL` は Cloud Run staging service の実 URL に確定済み。
@@ -28,7 +29,19 @@
     "CF_STORE_ID": "bd7bc91a3e5f4111add4acf6cb4b8733",
     "GITHUB_ORG": "ippoan",
     "GCP_PROJECT_ID": "cloudsql-sv",
-    "GCP_PROXY_URL": "https://secrets-inventory-gcp-staging-566bls5vfq-an.a.run.app"
+    "GCP_PROXY_URL": "https://secrets-inventory-gcp-staging-566bls5vfq-an.a.run.app",
+    // MCP server identity (initialize / serverInfo response 用)。
+    // protocol version は @modelcontextprotocol/sdk v1.29 が対応する最新
+    // streamable HTTP spec の日付 (2025-03-26)。
+    "MCP_SERVER_NAME": "secrets-inventory-read-mcp",
+    "MCP_SERVER_VERSION": "0.0.1",
+    "MCP_PROTOCOL_VERSION": "2025-03-26",
+    // /mcp* route の認証先。auth-worker (`ippoan/auth-worker`) が
+    // `binding_jwt` を mint し `POST /mcp/introspect` で verify する。
+    // 本 worker 側は shared secret を持たず、claude.ai connector の OAuth
+    // 2.1 auto-discovery 起点 (`WWW-Authenticate.resource_metadata`) の
+    // anchor URL としても使う。Refs #43。
+    "AUTH_WORKER_ORIGIN": "https://auth.ippoan.org"
   },
   "secrets_store_secrets": [
     {
@@ -50,9 +63,10 @@
   // `secrets.required` は ci-workflows/secret-verify-gcp.yml の入力。GCP
   // Secret Manager 上に **これらと完全に同名の secret が存在することを CI
   // で検証**する。CF Secrets Store の `secret_name` (kebab-case) と揃えて
-  // 宣言。命名規約 (#23) で kebab か SCREAMING_SNAKE どちらに寄せるかが
-  // まだ未決のため、CI が検出した時点で GCP 側に 3 secret を kebab で作成
-  // するか、または本宣言を変更するかを判断する想定。
+  // 宣言。
+  //
+  // 旧 `inventory-mcp-bearer` は #43 で削除済 (auth-worker `binding_jwt` に
+  // 切替、shared secret 不要)。
   "secrets": {
     "required": [
       "cf-secrets-inventory-secrets-store-read",
@@ -79,7 +93,11 @@
         "CF_STORE_ID": "bd7bc91a3e5f4111add4acf6cb4b8733",
         "GITHUB_ORG": "ippoan",
         "GCP_PROJECT_ID": "cloudsql-sv",
-        "GCP_PROXY_URL": "https://secrets-inventory-gcp-staging-566bls5vfq-an.a.run.app"
+        "GCP_PROXY_URL": "https://secrets-inventory-gcp-staging-566bls5vfq-an.a.run.app",
+        "MCP_SERVER_NAME": "secrets-inventory-read-mcp",
+        "MCP_SERVER_VERSION": "0.0.1",
+        "MCP_PROTOCOL_VERSION": "2025-03-26",
+        "AUTH_WORKER_ORIGIN": "https://auth-staging.ippoan.org"
       },
       "secrets_store_secrets": [
         {

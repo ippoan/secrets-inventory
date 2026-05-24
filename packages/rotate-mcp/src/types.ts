@@ -1,4 +1,5 @@
 import type { CfAccessClaims } from "./middleware/cf-access";
+import type { BindingJwtClaims } from "./middleware/binding-jwt";
 
 /**
  * `wrangler.jsonc` の vars / secrets_store_secrets と一致させる。
@@ -18,7 +19,9 @@ export interface Env {
   MCP_SERVER_NAME: string;
   MCP_SERVER_VERSION: string;
   MCP_PROTOCOL_VERSION: string;
-  ROTATE_MCP_BEARER: SecretsStoreSecret;
+  // /mcp* route 認証先 (auth-worker)。`binding_jwt` の verify を委譲する。
+  // shared secret は持たない (Refs #43)。
+  AUTH_WORKER_ORIGIN: string;
 
   // GCP provider (= secrets-inventory-gcp Cloud Run proxy 経由)
   GCP_PROJECT_ID: string;
@@ -37,7 +40,10 @@ export interface Env {
 
 export interface AppVariables {
   cfAccess: CfAccessClaims;
+  /** binding_jwt verify 成功時に立つ。`/mcp*` 配下では必ず存在する。 */
   bearerVerified: true;
+  /** auth-worker introspect が返した claims (sub / github_login / scope / exp)。 */
+  bindingJwt: BindingJwtClaims;
 }
 
 /** Cloudflare Secrets Store binding が提供する `.get()` interface */

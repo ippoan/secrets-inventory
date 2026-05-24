@@ -14,13 +14,13 @@
   // Phase B: 実 write 接続。tool は 3 provider (GCP proxy / CF API / GitHub
   // libsodium) に対して real call を行う。
   //
-  // 認証:
-  // - CF Access (Google OAuth) で edge 認証 → JWT を `Cf-Access-Jwt-Assertion`
-  //   で worker に到達。secrets-inventory worker と同じ team_domain / aud を
-  //   再利用する (同じ CF Access Application で保護する想定)。
-  // - tool 呼び出しは Bearer (Secrets Store binding `ROTATE_MCP_BEARER`) で
-  //   二重認証。30-day rotation 想定 (= 本 MCP 自身の rotate_secret で
-  //   dogfooding 化可能)。
+  // 認証 (Refs #43 で Phase A bearer → OAuth に切替):
+  // - `/mcp*` route は CF Access で edge bypassAll、worker 側で
+  //   `bindingJwtMiddleware` が auth-worker `binding_jwt` を verify。
+  //   shared secret は持たず、claude.ai connector の OAuth 2.1
+  //   auto-discovery (RFC 9728) を起点に `binding_jwt` を mint させる。
+  // - browser dashboard route (= rotate-mcp は持たない) は引き続き
+  //   CF Access で保護する想定 (= cf-access middleware は file として残置)。
   //
   // Bindings (write provider):
   // - GCP_PROXY_API_KEY: secrets-inventory-gcp Cloud Run proxy への shared
@@ -46,11 +46,16 @@
     "GCP_PROXY_URL": "https://secrets-inventory-gcp-staging-566bls5vfq-an.a.run.app",
     "CF_ACCOUNT_ID": "24b45709d060d957340180e995f0d373",
     "CF_STORE_ID": "bd7bc91a3e5f4111add4acf6cb4b8733",
-    "GITHUB_ORG": "ippoan"
+    "GITHUB_ORG": "ippoan",
+    // /mcp* 認証先。auth-worker (`ippoan/auth-worker`) の `/mcp/introspect`
+    // に binding_jwt を forward する。WWW-Authenticate header の
+    // `resource_metadata` anchor にも使う。Refs #43。
+    "AUTH_WORKER_ORIGIN": "https://auth.ippoan.org"
   },
+  // 旧 `rotate-mcp-bearer` は #43 で削除 (auth-worker `binding_jwt` に切替、
+  // shared secret 不要)。
   "secrets": {
     "required": [
-      "rotate-mcp-bearer",
       "secrets-inventory-gcp-proxy-api-key",
       "cf-secrets-inventory-secrets-store-write",
       "gh-secrets-inventory-org-secrets-write"
@@ -87,14 +92,10 @@
         "GCP_PROXY_URL": "https://secrets-inventory-gcp-staging-566bls5vfq-an.a.run.app",
         "CF_ACCOUNT_ID": "24b45709d060d957340180e995f0d373",
         "CF_STORE_ID": "bd7bc91a3e5f4111add4acf6cb4b8733",
-        "GITHUB_ORG": "ippoan"
+        "GITHUB_ORG": "ippoan",
+        "AUTH_WORKER_ORIGIN": "https://auth-staging.ippoan.org"
       },
       "secrets_store_secrets": [
-        {
-          "binding": "ROTATE_MCP_BEARER",
-          "store_id": "bd7bc91a3e5f4111add4acf6cb4b8733",
-          "secret_name": "rotate-mcp-bearer"
-        },
         {
           "binding": "GCP_PROXY_API_KEY",
           "store_id": "bd7bc91a3e5f4111add4acf6cb4b8733",

@@ -34,17 +34,55 @@ PR を上げると `frontend-ci.yml` 経由で staging に auto-deploy される
 
 ## エンドポイント
 
-`/` (dashboard) と `/api/*` (JSON) は Cloudflare Access (Google OAuth) 認証必須。
+`/` (dashboard) と `/api/*` (JSON) と `/mcp*` (MCP) は Cloudflare Access (Google OAuth) 認証必須。
+`/mcp*` は加えて `Authorization: Bearer` の **二重認証**。
 
 | method | path | 説明 |
 |---|---|---|
 | GET | `/healthz` | 認証不要 health check |
 | GET | `/` | 突合 dashboard (HTML)。`?commit=1` で snapshot を更新 |
+| GET | `/service-accounts` | GCP SA 監査 dashboard。`?format=json` で JSON |
 | GET | `/api/cloudflare/secrets` | CF Secrets Store のメタデータ list |
 | GET | `/api/github/secrets` | GitHub org Actions secrets のメタデータ list |
 | GET | `/api/gcp/secrets` | GCP Secret Manager のメタデータ list |
 | GET | `/api/all` | 3 プロバイダーを並列に叩いて 1 レスポンスにまとめる (partial success 対応) |
 | GET | `/api/inventory` | GCP 基準の突合 + 前回 snapshot との diff (JSON)。`?commit=1` で snapshot 更新 |
+| GET | `/api/service-accounts` | GCP SA inventory + 5-signal 監査結果 (JSON) |
+| POST | `/mcp` | MCP read server (Streamable HTTP, 2025-03-26 spec) |
+| GET | `/mcp/sse` | MCP read server legacy SSE (endpoint discovery) |
+| POST | `/mcp/sse/message` | MCP read server legacy SSE ingest |
+
+### MCP (read) server (`/mcp*`)
+
+`secrets-inventory` worker は read 機能を **MCP server** としても expose する。
+AI client (Claude Code / Claude Desktop / Cline 等の MCP-aware client) から tool
+呼び出しでメタデータ突合・SA 監査・snapshot を取得できる。
+
+実装は `@modelcontextprotocol/sdk` (TypeScript SDK) の `Server` class を使い、
+Workers の 1 request = 1 response モデルに合わせた薄い `WorkerTransport` bridge
+で接続している。`packages/rotate-mcp/` の write MCP server とは別 process / 別
+Bearer で運用する (read / write の blast radius を分離)。
+
+提供 tool:
+
+| tool | 引数 | 戻り値 (= dashboard で見える payload と同じ JSON) |
+|---|---|---|
+| `list_inventory` | `{ commit_snapshot?: boolean }` | `InventoryResult` (3 system 突合 + diff) |
+| `list_service_accounts` | `{}` | `SaInventoryResult` (SA + 5-signal 監査) |
+| `get_drift` | `{ targets?: ("github" \| "cloudflare")[] }` | drift 行のみ filter した payload |
+| `get_snapshot` | `{}` | 前回 GCP snapshot (`SnapshotV1` or `null`) |
+
+認証は CF Access (Google OAuth) + Bearer の二重認証必須:
+
+```
+Cf-Access-Jwt-Assertion: <CF Access JWT>
+Authorization: Bearer <INVENTORY_MCP_BEARER>
+```
+
+Bearer 値は Cloudflare Secrets Store (`inventory-mcp-bearer`) に格納し、worker は
+`INVENTORY_MCP_BEARER` binding 経由で読む。Bearer は手動で provisioning し、
+30 日ごとに rotation する想定 (`packages/rotate-mcp/` の dogfooding 拡大時に
+本 read MCP の bearer も rotate 対象に組み込む)。
 
 ### 突合 (`/api/inventory`, `/`)
 
@@ -141,23 +179,42 @@ CI 上では `ippoan/ci-workflows` の `frontend-ci.yml` 経由で:
 
 ```
 src/
-├── index.ts                  # Hono entry。/healthz unprotected + CF Access 必須 / と /api/*
+├── index.ts                  # Hono entry。/healthz unprotected + CF Access 必須 /, /api/*, /mcp*
 ├── types.ts                  # Env / SecretMetadata 等の共通型
 ├── diff.ts                   # 突合 + 差分検知の pure ロジック
 ├── snapshot.ts               # KV (SNAPSHOT_KV) への前回スナップショット r/w
 ├── gcp-console.ts            # GCP コンソール URL 組み立て (list / per-secret)
 ├── inventory.ts              # 3 provider fetch + diff + KV を束ねる orchestration
+├── sa-inventory.ts           # GCP service accounts inventory + 監査 orchestration
 ├── ui.ts                     # 突合 dashboard の SSR (HTML 生成、pure)
+├── sa-ui.ts                  # SA 監査 dashboard SSR
+├── audit/
+│   └── sa-flags.ts           # SA 5-signal 監査
 ├── middleware/
-│   └── cf-access.ts          # Cloudflare Access JWT (jose) 検証 middleware
+│   ├── cf-access.ts          # Cloudflare Access JWT (jose) 検証 middleware
+│   └── bearer.ts             # `/mcp*` 用 Bearer (二重認証)
+├── mcp/
+│   ├── http-handler.ts       # Hono ↔ MCP SDK Server の HTTP bridge (POST /mcp, SSE)
+│   ├── transport.ts          # Workers 向け Transport (1 req = 1 res の bridge)
+│   ├── server.ts             # @modelcontextprotocol/sdk Server + tools 登録
+│   └── tools/
+│       ├── list-inventory.ts
+│       ├── list-service-accounts.ts
+│       ├── get-drift.ts
+│       └── get-snapshot.ts
 ├── providers/
 │   ├── cloudflare.ts         # CF Secrets Store list
 │   ├── github.ts             # GitHub org Actions secrets list (paginated)
-│   └── gcp.ts                # GCP Secret Manager list (Cloud Run proxy 経由)
+│   ├── gcp.ts                # GCP Secret Manager list (Cloud Run proxy 経由)
+│   └── gcp-iam.ts            # GCP IAM (SA inventory) proxy client
 └── routes/
     ├── list.ts               # /api/{provider}/secrets と /api/all
     ├── inventory.ts          # /api/inventory (JSON)
+    ├── service-accounts.ts   # /api/service-accounts + /service-accounts HTML
     └── ui.ts                 # / (HTML dashboard handler)
+
+packages/
+└── rotate-mcp/               # write MCP server (issue #18 Phase A、別 worker として deploy)
 ```
 
 新しい provider を足す場合は `src/providers/*.ts` に list 関数を書き、
