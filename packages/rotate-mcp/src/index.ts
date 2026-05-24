@@ -1,11 +1,6 @@
 import { Hono } from "hono";
-import type { Env, AppVariables, SecretsStoreSecret } from "./types";
-import {
-  cfAccessMiddleware,
-  defaultJwksResolver,
-  type JwksResolver,
-} from "./middleware/cf-access";
-import { bearerMiddleware } from "./middleware/bearer";
+import type { Env, AppVariables } from "./types";
+import { bindingJwtMiddleware } from "./middleware/binding-jwt";
 import {
   streamableHttpPost,
   legacySseGet,
@@ -13,15 +8,18 @@ import {
 } from "./mcp/transport";
 
 export interface CreateAppOptions {
-  /** test 用 override。本番は `defaultJwksResolver` (remote JWKS) を使う。 */
-  jwksResolver?: JwksResolver;
-  /** test 用 override。本番は Secrets Store binding を使う。 */
-  expectedBearer?: SecretsStoreSecret;
+  /** test 用 override。binding_jwt verify 用の introspect fetch を差し替える。 */
+  introspectFetch?: typeof fetch;
 }
 
 /**
  * Hono app を組み立てる factory。test では override を渡して remote 依存を
  * bypass する。本番 (default export) は何も渡さない。
+ *
+ * Refs #43 で `/mcp*` 認証は auth-worker `binding_jwt` (= `bindingJwtMiddleware`)
+ * 1 段のみ。CF Access は edge で bypassAll に設定済みであり、worker 側に
+ * cfAccessMiddleware を載せると `Cf-Access-Jwt-Assertion` 欠落で 401 になる。
+ * cf-access middleware は browser route が増えた時のために file は残してある。
  */
 export function createApp(options: CreateAppOptions = {}) {
   const app = new Hono<{ Bindings: Env; Variables: AppVariables }>();
@@ -36,13 +34,12 @@ export function createApp(options: CreateAppOptions = {}) {
     }),
   );
 
-  // CF Access + Bearer の二重認証を `/mcp/*` 全体に適用。
-  const jwksResolver = options.jwksResolver ?? defaultJwksResolver;
-  app.use("/mcp/*", cfAccessMiddleware(jwksResolver));
-  app.use(
-    "/mcp/*",
-    bearerMiddleware({ expectedBearer: options.expectedBearer }),
-  );
+  // binding_jwt verify を `/mcp` と `/mcp/*` に適用。Hono の `/mcp/*` は
+  // `/mcp/foo` 以下しかマッチしないため、`/mcp` 自身にも別途 mount する
+  // (= POST /mcp が unauth で通り抜ける旧 bug の structural fix も兼ねる)。
+  const authMw = bindingJwtMiddleware({ introspectFetch: options.introspectFetch });
+  app.use("/mcp", authMw);
+  app.use("/mcp/*", authMw);
 
   // Streamable HTTP (推奨 transport)
   app.post("/mcp", streamableHttpPost);

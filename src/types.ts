@@ -49,12 +49,14 @@ export interface Env {
   // KV: PR3 で前回の name 一覧スナップショットを格納
   SNAPSHOT_KV: KVNamespace;
 
-  // MCP server (read MCP route `/mcp`)。CF Access の上に Bearer の二重認証を
-  // 載せて AI client / tool call を identify する。Bearer は Secrets Store に
-  // 保管し、`INVENTORY_MCP_BEARER` binding 経由で取得する。MCP_* vars は
+  // MCP server (read MCP route `/mcp`)。CF Access の上に auth-worker
+  // (`AUTH_WORKER_ORIGIN`) が mint した `binding_jwt` (Bearer) の二重認証を
+  // 載せて AI client / tool call を identify する。binding_jwt は
+  // `POST {AUTH_WORKER_ORIGIN}/mcp/introspect` Mode 1 で verify するため、
+  // 本 worker は shared secret を持たない (Refs #43)。MCP_* vars は
   // initialize / serverInfo response の出処。
   MCP_SERVER_NAME: string;
   MCP_SERVER_VERSION: string;
   MCP_PROTOCOL_VERSION: string;
-  INVENTORY_MCP_BEARER: SecretsStoreSecret;
+  AUTH_WORKER_ORIGIN: string;
 }

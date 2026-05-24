@@ -26,7 +26,7 @@ function mkEnv(): Env {
     MCP_SERVER_NAME: "secrets-inventory-read-mcp",
     MCP_SERVER_VERSION: "0.0.1",
     MCP_PROTOCOL_VERSION: "2025-03-26",
-    INVENTORY_MCP_BEARER: { get: async () => "test-bearer" } as Env["INVENTORY_MCP_BEARER"],
+    AUTH_WORKER_ORIGIN: "https://auth.invalid",
   };
 }
 
