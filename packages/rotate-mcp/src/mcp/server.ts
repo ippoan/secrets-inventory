@@ -13,9 +13,19 @@ import {
   rotateSecretTool,
   dryRunRotateTool,
   validateRotateSecretArgs,
+  executeRotateSecret,
   executeRotateSecretMock,
   validationError,
+  type ExecuteOptions,
 } from "./tools/rotate-secret";
+
+export interface McpRequestOptions {
+  /** test 注入用。本番は global fetch。 */
+  fetcher?: typeof fetch;
+  /** actor email (CF Access JWT claim 経由で middleware が差し込む)。
+   *  GCP proxy の actor audit log に転送される。 */
+  actorEmail?: string;
+}
 
 /**
  * 1 つの JSON-RPC リクエストを処理する。notification (= `id` 不在) は null を
@@ -24,6 +34,7 @@ import {
 export async function handleMcpRequest(
   req: JsonRpcRequest,
   env: Env,
+  options: McpRequestOptions = {},
 ): Promise<JsonRpcResponse | null> {
   if (!isJsonRpcRequest(req)) {
     return makeError(null, JSON_RPC_INVALID_REQUEST, "not a JSON-RPC 2.0 request");
@@ -57,7 +68,7 @@ export async function handleMcpRequest(
         });
 
       case "tools/call":
-        return handleToolsCall(id, req.params);
+        return await handleToolsCall(id, req.params, env, options);
 
       default:
         return makeError(
@@ -72,10 +83,12 @@ export async function handleMcpRequest(
   }
 }
 
-function handleToolsCall(
+async function handleToolsCall(
   id: number | string | null,
   rawParams: unknown,
-): JsonRpcResponse {
+  env: Env,
+  options: McpRequestOptions,
+): Promise<JsonRpcResponse> {
   if (typeof rawParams !== "object" || rawParams === null) {
     return validationError(id, "tools/call params must be an object");
   }
@@ -90,11 +103,16 @@ function handleToolsCall(
       if (!validated.ok) {
         return validationError(id, validated.error);
       }
-      const result = executeRotateSecretMock(validated.args, { dryRun: false });
+      const execOpts: ExecuteOptions = {
+        fetcher: options.fetcher,
+        actorEmail: options.actorEmail,
+      };
+      const result = await executeRotateSecret(validated.args, env, execOpts);
       return makeSuccess(id, toolCallResult(result));
     }
     case "dry_run_rotate": {
       // dry_run_rotate は rotate_secret の subset。confirm_name / new_value は不要。
+      // 実 write はせず mock 結果を返す (= side-effect 0 を test で固定)。
       if (typeof params.arguments !== "object" || params.arguments === null) {
         return validationError(id, "dry_run_rotate arguments must be an object");
       }

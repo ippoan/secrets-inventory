@@ -2,15 +2,13 @@ import { describe, it, expect } from "vitest";
 import { Hono } from "hono";
 import { bearerMiddleware } from "../../src/middleware/bearer";
 import type { Env, AppVariables, SecretsStoreSecret } from "../../src/types";
+import { makeTestEnv } from "../helpers/env";
 
-const baseEnv: Env = {
+const baseEnv = makeTestEnv({
   CF_ACCESS_TEAM_DOMAIN: "x.cloudflareaccess.com",
   CF_ACCESS_AUD: "aud",
-  MCP_SERVER_NAME: "secrets-rotate-mcp",
-  MCP_SERVER_VERSION: "0.0.1",
-  MCP_PROTOCOL_VERSION: "2025-03-26",
   ROTATE_MCP_BEARER: mockSecret("sekret-value"),
-};
+});
 
 function mockSecret(value: string): SecretsStoreSecret {
   return {

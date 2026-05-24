@@ -1,15 +1,13 @@
 import { describe, it, expect } from "vitest";
 import { handleMcpRequest } from "../../src/mcp/server";
 import type { Env } from "../../src/types";
+import { makeTestEnv } from "../helpers/env";
+import { stubFetcher, happyPathRoutes } from "../helpers/fetcher";
 
-const env: Env = {
+const env = makeTestEnv({
   CF_ACCESS_TEAM_DOMAIN: "x.cloudflareaccess.com",
   CF_ACCESS_AUD: "aud",
-  MCP_SERVER_NAME: "secrets-rotate-mcp",
-  MCP_SERVER_VERSION: "0.0.1",
-  MCP_PROTOCOL_VERSION: "2025-03-26",
-  ROTATE_MCP_BEARER: { get: async () => "x" },
-};
+});
 
 describe("handleMcpRequest", () => {
   it("responds to initialize with serverInfo + protocol + capabilities", async () => {
@@ -80,7 +78,8 @@ describe("handleMcpRequest", () => {
 });
 
 describe("handleMcpRequest tools/call rotate_secret", () => {
-  it("calls rotate_secret with valid args + returns mock result", async () => {
+  it("calls rotate_secret with valid args + returns real provider results", async () => {
+    const { fetcher, calls } = stubFetcher(happyPathRoutes("MY_SECRET"));
     const res = await handleMcpRequest(
       {
         jsonrpc: "2.0",
@@ -90,12 +89,13 @@ describe("handleMcpRequest tools/call rotate_secret", () => {
           name: "rotate_secret",
           arguments: {
             name: "MY_SECRET",
-            new_value: "v",
+            new_value: "super-secret-value",
             confirm_name: "MY_SECRET",
           },
         },
       },
       env,
+      { fetcher, actorEmail: "actor@example.com" },
     );
     if (res === null || "error" in res) throw new Error("expected success");
     const result = res.result as {
@@ -107,8 +107,14 @@ describe("handleMcpRequest tools/call rotate_secret", () => {
     const payload = JSON.parse(result.content[0]!.text);
     expect(payload.ok).toBe(true);
     expect(payload.dry_run).toBe(false);
+    expect(payload.results.gcp.status).toBe("ok");
+    expect(payload.results.cf.status).toBe("ok");
+    expect(payload.results.github.status).toBe("ok");
     // new_value は response に echo されない
-    expect(result.content[0]!.text).not.toContain('"new_value"');
+    expect(result.content[0]!.text).not.toContain("super-secret-value");
+    // actor email は GCP proxy header に転送される
+    const gcpCall = calls.find((c) => c.url.includes("/add-version"));
+    expect(gcpCall).toBeDefined();
   });
 
   it("rejects rotate_secret with bad arguments (confirm mismatch)", async () => {
@@ -169,7 +175,7 @@ describe("handleMcpRequest tools/call rotate_secret", () => {
     expect(payload.results.gcp.status).toBe("skipped");
   });
 
-  it("rejects dry_run_rotate with bad name", async () => {
+  it("rejects dry_run_rotate with bad name (starts with digit)", async () => {
     const res = await handleMcpRequest(
       {
         jsonrpc: "2.0",
@@ -177,7 +183,7 @@ describe("handleMcpRequest tools/call rotate_secret", () => {
         method: "tools/call",
         params: {
           name: "dry_run_rotate",
-          arguments: { name: "lowercase" },
+          arguments: { name: "1bad" },
         },
       },
       env,

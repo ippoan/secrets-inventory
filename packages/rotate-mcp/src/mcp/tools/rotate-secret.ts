@@ -4,16 +4,27 @@ import {
   type JsonRpcError,
 } from "../jsonrpc";
 import type {
+  Env,
   RotateSecretArgs,
   RotateSecretResult,
   RotateSecretProviderResult,
   RotationTarget,
 } from "../../types";
+import { rotateGcp } from "../../providers/gcp";
+import { rotateCloudflare } from "../../providers/cloudflare";
+import { rotateGithub } from "../../providers/github";
 
 // MCP tool 定義 (tools/list で expose する schema)。issue #18 の draft schema と
-// 揃える。Phase A は mock なので実 write はせず、入力検証 + result mock を返す。
+// 揃える。Phase B から実 write 接続 (3 provider) を持つ。
+//
+// name pattern を Phase B で relax:
+//   旧 `^[A-Z][A-Z0-9_]{0,127}$` (SCREAMING_SNAKE 専用) → 新 kebab も許容。
+// 親 repo の secrets.required は kebab-case (例 `cf-secrets-inventory-secrets-
+// store-read`) で運用されているため、SCREAMING_SNAKE 専用だと現存 secret を
+// rotate できなかった。GitHub Actions secrets は SCREAMING_SNAKE 強制だが
+// それは GitHub provider が PUT 時に GitHub API 側 422 として弾く前提。
 
-const NAME_PATTERN = "^[A-Z][A-Z0-9_]{0,127}$";
+const NAME_PATTERN = "^[A-Za-z][A-Za-z0-9_-]{0,127}$";
 const TARGETS_DEFAULT: RotationTarget[] = ["gcp", "cf", "github"];
 
 export const rotateSecretTool = {
@@ -21,14 +32,14 @@ export const rotateSecretTool = {
   description:
     "GCP Secret Manager を source of truth として、新値を 3 system に投入。" +
     "type-to-confirm / value preview / TOCTOU 検証込み。" +
-    "Phase A: mock 実装、実 write はせず result mock を返す。",
+    "Phase B: 実 write 接続 (GCP proxy / CF API / GitHub libsodium)。",
   inputSchema: {
     type: "object",
     properties: {
       name: {
         type: "string",
         pattern: NAME_PATTERN,
-        description: "secret 名 (大文字英数 + underscore、先頭は英字)",
+        description: "secret 名 (SCREAMING_SNAKE / kebab-case、先頭は英字)",
       },
       new_value: {
         type: "string",
@@ -223,4 +234,104 @@ function mockProviderResult(
 
 export function validationError(id: number | string | null, message: string): JsonRpcError {
   return makeError(id, JSON_RPC_INVALID_PARAMS, message);
+}
+
+// ===========================================================================
+// Phase B: 実 write 接続 executor
+// ===========================================================================
+
+export interface ExecuteOptions {
+  /** test 注入用。本番は global fetch。 */
+  fetcher?: typeof fetch;
+  /** test 注入用。本番は `() => new Date()`。 */
+  now?: () => Date;
+  /** actor email (CF Access JWT の email claim)。GCP proxy の actor audit log
+   *  に転送される。 */
+  actorEmail?: string;
+}
+
+/**
+ * 3 provider を **並列実行** し、provider 単位の結果を集約する。
+ *
+ * - partial failure は rollback しない (= issue #18 のセキュリティ要件
+ *   「partial failure 時 rollback しない、provider 単位 status を返す」)
+ * - new_value は provider 関数 引数として 1 度だけ渡し、log / response /
+ *   error にも echo しない (各 provider 内で enforce)
+ * - 全 provider success → ok=true、1 つでも fail → ok=false
+ *
+ * `expected_gcp_version_id` は GCP provider 専用 (TOCTOU)。他 provider に
+ * 該当 hook 無し (CF / GitHub は version concept 無し)。
+ */
+export async function executeRotateSecret(
+  args: ValidateArgsOk["args"],
+  env: Env,
+  options: ExecuteOptions = {},
+): Promise<RotateSecretResult> {
+  const now = options.now ?? (() => new Date());
+  const timestamp = now().toISOString();
+  const rotationId = `rot_${timestamp}_${crypto.randomUUID().slice(0, 8)}`;
+
+  // 並列実行。各 provider は throw せず Result を返す契約なので allSettled
+  // ではなく Promise.all で OK。failure も Result 経由で集約される。
+  const pending: Array<Promise<[RotationTarget, RotateSecretProviderResult]>> = [];
+
+  for (const target of args.targets) {
+    pending.push(runProvider(target, args, env, options).then((r) => [target, r]));
+  }
+
+  const settled = await Promise.all(pending);
+
+  const results: RotateSecretResult["results"] = {};
+  let ok = true;
+  for (const [target, result] of settled) {
+    results[target] = result;
+    if (result.status !== "ok") ok = false;
+  }
+
+  return {
+    ok,
+    rotation_id: rotationId,
+    dry_run: false,
+    results,
+  };
+}
+
+async function runProvider(
+  target: RotationTarget,
+  args: ValidateArgsOk["args"],
+  env: Env,
+  options: ExecuteOptions,
+): Promise<RotateSecretProviderResult> {
+  try {
+    switch (target) {
+      case "gcp":
+        return await rotateGcp(
+          {
+            name: args.name,
+            newValue: args.new_value,
+            expectedVersionId: args.expected_gcp_version_id,
+            actorEmail: options.actorEmail,
+          },
+          { env, fetcher: options.fetcher },
+        );
+      case "cf":
+        return await rotateCloudflare(
+          { name: args.name, newValue: args.new_value },
+          { env, fetcher: options.fetcher },
+        );
+      case "github":
+        return await rotateGithub(
+          { name: args.name, newValue: args.new_value },
+          { env, fetcher: options.fetcher },
+        );
+    }
+  } catch (err) {
+    // provider 関数は内部で throw しない契約だが、defense in depth として
+    // 上位で握り潰す (= 1 provider の unexpected throw が他 provider 結果を
+    // 巻き込まないよう)。message は generic に。
+    return {
+      status: "fail",
+      error: `${target} unexpected: ${err instanceof Error ? err.message : "unknown"}`,
+    };
+  }
 }
