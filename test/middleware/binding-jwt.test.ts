@@ -29,8 +29,11 @@ describe("bindingJwtMiddleware", () => {
     expect(res.status).toBe(401);
     const www = res.headers.get("WWW-Authenticate");
     expect(www).toContain('Bearer realm="MCP"');
+    // Refs ippoan/auth-worker#195: per-resource metadata endpoint。本 worker
+    // 専用 slug (`security-inventory`) を suffix に持つ URL を指す (= MCP relay
+    // 用 base path を避けて aud mismatch を解消)。
     expect(www).toContain(
-      'resource_metadata="https://auth.invalid/.well-known/oauth-protected-resource"',
+      'resource_metadata="https://auth.invalid/.well-known/oauth-protected-resource/security-inventory"',
     );
     expect(www).toContain('error="invalid_token"');
   });
