@@ -62,10 +62,25 @@ export interface BindingJwtMiddlewareOptions {
   expectedAud?: readonly string[] | null;
 }
 
+// 本 worker (`security-inventory.ippoan.org`) は MCP relay (`mcp(-staging).ippoan.org`)
+// とは別の独立 RS なので、auth-worker の per-resource metadata endpoint
+// (`/.well-known/oauth-protected-resource/security-inventory`) を指す。
+// auth-worker 側 `MCP_RESOURCE_ORIGINS_ALLOWLIST` に
+// `https://security-inventory.ippoan.org` を含む env (= staging / prod 両方)
+// で 200 を返し、`resource: https://security-inventory.ippoan.org` を宣言する。
+// slug は allowlist 内 URL の hostname 先頭 label と一致させる規約
+// (Refs ippoan/auth-worker#195)。
+//
+// 旧来 `/.well-known/oauth-protected-resource` (slug 無し = MCP relay 用)
+// を指していたため、client (Anthropic Claude Code) が `resource: https://mcp-
+// staging.ippoan.org` の token を mint しても本 worker URL と aud 不一致で
+// 使えず、"Couldn't reach the MCP server" で setup 失敗していた (Refs #45)。
+const RESOURCE_METADATA_SLUG = "security-inventory";
+
 function wwwAuthenticate(authOrigin: string, error?: string): string {
   // RFC 6750 + RFC 9728 (Protected Resource Metadata)。claude.ai connector は
   // `resource_metadata` を辿って AS を auto-discover する。
-  const base = `Bearer realm="MCP", resource_metadata="${authOrigin}/.well-known/oauth-protected-resource"`;
+  const base = `Bearer realm="MCP", resource_metadata="${authOrigin}/.well-known/oauth-protected-resource/${RESOURCE_METADATA_SLUG}"`;
   return error ? `${base}, error="${error}"` : base;
 }
 
