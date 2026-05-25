@@ -7,12 +7,18 @@ import { createGithub, ghProxyCtxFromEnv } from "../../providers/github";
 // Refs #45 Stage 2: `packages/rotate-mcp` の create_secret tool を親 worker
 // に統合。3 system に新規 secret を作成 + 初版投入する。rotate_secret と
 // 同じ scope (= mcp.write 必須)。
+//
+// HTTP body 経由で value を受け取る `PUT /mcp/secret-upload/:name` route
+// (`src/routes/secret-upload.ts`) も同じ `executeCreate` を共有する。LLM
+// agent が tool-call の JSON parameter に value を載せず、shell の curl で
+// `--data-binary @file` を流せる経路 (= LLM context に value を載せない) を
+// 提供するため。
 
-const NAME_PATTERN = /^[A-Za-z][A-Za-z0-9_-]{0,127}$/;
-const ROTATION_TARGETS = ["gcp", "cf", "github"] as const;
-type RotationTarget = (typeof ROTATION_TARGETS)[number];
+export const NAME_PATTERN = /^[A-Za-z][A-Za-z0-9_-]{0,127}$/;
+export const ROTATION_TARGETS = ["gcp", "cf", "github"] as const;
+export type RotationTarget = (typeof ROTATION_TARGETS)[number];
 
-interface ProviderResult {
+export interface ProviderResult {
   status: "ok" | "fail";
   new_version?: string;
   secret_id?: string;
@@ -20,11 +26,41 @@ interface ProviderResult {
   error?: string;
 }
 
-interface CreateResult {
+export interface CreateResult {
   ok: boolean;
   rotation_id: string;
   dry_run: false;
   results: Partial<Record<RotationTarget, ProviderResult>>;
+}
+
+/** `initial_value` を持つ最終形の create_secret 引数。MCP tool / HTTP route
+ *  の両 entry point から `executeCreate` に流す。 */
+export interface ResolvedCreateArgs {
+  name: string;
+  initial_value: string;
+  targets: readonly RotationTarget[];
+  fail_if_exists: boolean;
+  cf_scopes?: string[];
+}
+
+export async function executeCreate(
+  env: Env,
+  args: ResolvedCreateArgs,
+  actorEmail?: string,
+): Promise<CreateResult> {
+  const rotationId = `crt_${new Date().toISOString()}_${crypto.randomUUID().slice(0, 8)}`;
+  const pending: Array<Promise<[RotationTarget, ProviderResult]>> = [];
+  for (const target of args.targets) {
+    pending.push(runCreate(target, args, env, actorEmail).then((r) => [target, r]));
+  }
+  const settled = await Promise.all(pending);
+  const results: CreateResult["results"] = {};
+  let ok = true;
+  for (const [target, result] of settled) {
+    results[target] = result;
+    if (result.status !== "ok") ok = false;
+  }
+  return { ok, rotation_id: rotationId, dry_run: false, results };
 }
 
 export const createSecretInputSchema = z
@@ -63,31 +99,31 @@ export const createSecretTool = {
   name: "create_secret",
   description:
     "3 system に新規 secret を作成し初版値を投入する。rotate_secret の create 版。" +
-    "fail_if_exists=true (default) で既存衝突は fail。Refs #45 で Cloud Run proxy 経由に統一。",
+    "fail_if_exists=true (default) で既存衝突は fail。Refs #45 で Cloud Run proxy 経由に統一。" +
+    "LLM agent の tool-call JSON に value を載せたくない場合は HTTP route " +
+    "`PUT /mcp/secret-upload/:name?targets=...` に curl --data-binary で直接流せる " +
+    "(value は LLM context を経由せず、shell → curl body → worker memory → " +
+    "Secret Manager の経路で投入される)。",
   inputSchema: createSecretInputSchema,
   requiresScope: "mcp.write" as const,
   execute: async (env: Env, args: CreateSecretArgs, actorEmail?: string): Promise<CreateResult> => {
-    const rotationId = `crt_${new Date().toISOString()}_${crypto.randomUUID().slice(0, 8)}`;
-
-    const pending: Array<Promise<[RotationTarget, ProviderResult]>> = [];
-    for (const target of args.targets) {
-      pending.push(runCreate(target, args, env, actorEmail).then((r) => [target, r]));
-    }
-    const settled = await Promise.all(pending);
-
-    const results: CreateResult["results"] = {};
-    let ok = true;
-    for (const [target, result] of settled) {
-      results[target] = result;
-      if (result.status !== "ok") ok = false;
-    }
-    return { ok, rotation_id: rotationId, dry_run: false, results };
+    return await executeCreate(
+      env,
+      {
+        name: args.name,
+        initial_value: args.initial_value,
+        targets: args.targets,
+        fail_if_exists: args.fail_if_exists,
+        cf_scopes: args.cf_scopes,
+      },
+      actorEmail,
+    );
   },
 } as const;
 
 async function runCreate(
   target: RotationTarget,
-  args: CreateSecretArgs,
+  args: ResolvedCreateArgs,
   env: Env,
   actorEmail: string | undefined,
 ): Promise<ProviderResult> {

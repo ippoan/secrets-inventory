@@ -3,6 +3,11 @@ import type { Env } from "../../types";
 import { rotateGcp, gcpProxyCtxFromEnv } from "../../providers/gcp";
 import { rotateCloudflare, cfProxyCtxFromEnv } from "../../providers/cloudflare";
 import { rotateGithub, ghProxyCtxFromEnv } from "../../providers/github";
+import {
+  NAME_PATTERN as SHARED_NAME_PATTERN,
+  ROTATION_TARGETS as SHARED_ROTATION_TARGETS,
+  type RotationTarget,
+} from "./create-secret";
 
 // Refs #45 Stage 2: `packages/rotate-mcp` の rotate_secret tool を親 worker
 // `/mcp` route に統合した。3 provider 全部 GCP Cloud Run proxy 経由に統一
@@ -12,23 +17,54 @@ import { rotateGithub, ghProxyCtxFromEnv } from "../../providers/github";
 // write tool 扱い: `requiresScope: "mcp.write"` を立て、binding_jwt の scope
 // に mcp.write が含まれていなければ MCP server 側 dispatcher で 403 相当の
 // JSONRPC error を返す。
+//
+// HTTP body 経由 (`PUT /mcp/secret-upload/:name?mode=rotate&...`) からも
+// `executeRotate` を共有する (= LLM agent の tool-call JSON に value を
+// 載せず curl --data-binary で送る経路を提供するため)。
 
-const NAME_PATTERN = /^[A-Za-z][A-Za-z0-9_-]{0,127}$/;
-const ROTATION_TARGETS = ["gcp", "cf", "github"] as const;
-type RotationTarget = (typeof ROTATION_TARGETS)[number];
+const NAME_PATTERN = SHARED_NAME_PATTERN;
+const ROTATION_TARGETS = SHARED_ROTATION_TARGETS;
 
-interface ProviderResult {
+export interface ProviderResult {
   status: "ok" | "fail" | "skipped";
   new_version?: string;
   secret_id?: string;
   error?: string;
 }
 
-interface RotateResult {
+export interface RotateResult {
   ok: boolean;
   rotation_id: string;
   dry_run: boolean;
   results: Partial<Record<RotationTarget, ProviderResult>>;
+}
+
+/** `new_value` を持つ最終形の rotate_secret 引数。MCP tool / HTTP route 共通。 */
+export interface ResolvedRotateArgs {
+  name: string;
+  new_value: string;
+  targets: readonly RotationTarget[];
+  expected_gcp_version_id?: string;
+}
+
+export async function executeRotate(
+  env: Env,
+  args: ResolvedRotateArgs,
+  actorEmail?: string,
+): Promise<RotateResult> {
+  const rotationId = newRotationId("rot");
+  const pending: Array<Promise<[RotationTarget, ProviderResult]>> = [];
+  for (const target of args.targets) {
+    pending.push(runProvider(target, args, env, actorEmail).then((r) => [target, r]));
+  }
+  const settled = await Promise.all(pending);
+  const results: RotateResult["results"] = {};
+  let ok = true;
+  for (const [target, result] of settled) {
+    results[target] = result;
+    if (result.status !== "ok") ok = false;
+  }
+  return { ok, rotation_id: rotationId, dry_run: false, results };
 }
 
 export const rotateSecretInputSchema = z
@@ -68,11 +104,22 @@ export const rotateSecretTool = {
   description:
     "GCP Secret Manager を source of truth として、新値を 3 system に投入。" +
     "type-to-confirm / TOCTOU 検証込み。Refs #45 で 3 provider すべて " +
-    "Cloud Run proxy 経由に統一。",
+    "Cloud Run proxy 経由に統一。" +
+    "LLM agent の tool-call JSON に value を載せたくない場合は HTTP route " +
+    "`PUT /mcp/secret-upload/:name?mode=rotate&targets=...` に curl で直接送れる。",
   inputSchema: rotateSecretInputSchema,
   requiresScope: "mcp.write" as const,
   execute: async (env: Env, args: RotateSecretArgs, actorEmail?: string): Promise<RotateResult> => {
-    return await executeRotation(env, args, actorEmail, /*dryRun*/ false);
+    return await executeRotate(
+      env,
+      {
+        name: args.name,
+        new_value: args.new_value,
+        targets: args.targets,
+        expected_gcp_version_id: args.expected_gcp_version_id,
+      },
+      actorEmail,
+    );
   },
 } as const;
 
@@ -110,37 +157,9 @@ export const dryRunRotateTool = {
   },
 } as const;
 
-async function executeRotation(
-  env: Env,
-  args: RotateSecretArgs,
-  actorEmail: string | undefined,
-  dryRun: boolean,
-): Promise<RotateResult> {
-  const rotationId = newRotationId("rot");
-  if (dryRun) {
-    const results: RotateResult["results"] = {};
-    for (const target of args.targets) results[target] = { status: "skipped" };
-    return { ok: true, rotation_id: rotationId, dry_run: true, results };
-  }
-
-  const pending: Array<Promise<[RotationTarget, ProviderResult]>> = [];
-  for (const target of args.targets) {
-    pending.push(runProvider(target, args, env, actorEmail).then((r) => [target, r]));
-  }
-  const settled = await Promise.all(pending);
-
-  const results: RotateResult["results"] = {};
-  let ok = true;
-  for (const [target, result] of settled) {
-    results[target] = result;
-    if (result.status !== "ok") ok = false;
-  }
-  return { ok, rotation_id: rotationId, dry_run: false, results };
-}
-
 async function runProvider(
   target: RotationTarget,
-  args: RotateSecretArgs,
+  args: ResolvedRotateArgs,
   env: Env,
   actorEmail: string | undefined,
 ): Promise<ProviderResult> {
