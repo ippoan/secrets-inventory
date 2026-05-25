@@ -75,6 +75,24 @@ describe("rotate_secret tool", () => {
     expect(result.content[0]!.text).toMatch(/invalid arguments/);
   });
 
+  it("rejects targets without gcp (= GCP source-of-truth enforcement)", async () => {
+    // `targets: ["github"]` のように GCP を含まない指定は schema refine で
+    // 弾く。CLAUDE.md「GCP が正 (source of truth)」原則。route 層側でも
+    // 同じ check (test/routes/secret-upload.test.ts) を持つ。
+    for (const t of [["github"], ["cf"], ["cf", "github"]]) {
+      const res = await rpc(env(), writeClaims, {
+        method: "tools/call",
+        params: {
+          name: "rotate_secret",
+          arguments: { name: "FOO", new_value: "v", confirm_name: "FOO", targets: t },
+        },
+      });
+      const result = res.result as { isError: boolean; content: Array<{ text: string }> };
+      expect(result.isError).toBe(true);
+      expect(result.content[0]!.text).toMatch(/source of truth|must include 'gcp'/);
+    }
+  });
+
   it("invokes 3 provider proxy endpoints with mcp.write scope", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = typeof input === "string" ? input : input.toString();
@@ -210,5 +228,20 @@ describe("create_secret tool", () => {
     expect(payload.results.gcp.created).toBe(true);
     expect(payload.results.cf.created).toBe(true);
     expect(payload.results.github.created).toBe(true);
+  });
+
+  it("rejects targets without gcp (= GCP source-of-truth enforcement)", async () => {
+    for (const t of [["github"], ["cf"], ["cf", "github"]]) {
+      const res = await rpc(env(), writeClaims, {
+        method: "tools/call",
+        params: {
+          name: "create_secret",
+          arguments: { name: "NEW", initial_value: "v", confirm_name: "NEW", targets: t },
+        },
+      });
+      const result = res.result as { isError: boolean; content: Array<{ text: string }> };
+      expect(result.isError).toBe(true);
+      expect(result.content[0]!.text).toMatch(/source of truth|must include 'gcp'/);
+    }
   });
 });

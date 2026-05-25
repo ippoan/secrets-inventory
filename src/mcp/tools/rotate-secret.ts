@@ -6,6 +6,8 @@ import { rotateGithub, ghProxyCtxFromEnv } from "../../providers/github";
 import {
   NAME_PATTERN as SHARED_NAME_PATTERN,
   ROTATION_TARGETS as SHARED_ROTATION_TARGETS,
+  TARGETS_MUST_INCLUDE_GCP_MESSAGE,
+  targetsIncludeGcp,
   type RotationTarget,
 } from "./create-secret";
 
@@ -82,7 +84,10 @@ export const rotateSecretInputSchema = z
       .array(z.enum(ROTATION_TARGETS))
       .min(1)
       .default([...ROTATION_TARGETS])
-      .describe("更新対象 provider 群。省略時は 3 system すべて。"),
+      .describe(
+        "更新対象 provider 群。省略時は 3 system すべて。" +
+          "GCP は source of truth として必ず含めること (= `gcp` を外せない)。",
+      ),
     confirm_name: z
       .string()
       .describe("type-to-confirm: name と一致する文字列。不一致なら invalid_params。"),
@@ -95,6 +100,10 @@ export const rotateSecretInputSchema = z
   .refine((d) => d.confirm_name === d.name, {
     message: "confirm_name does not match name",
     path: ["confirm_name"],
+  })
+  .refine((d) => targetsIncludeGcp(d.targets), {
+    message: TARGETS_MUST_INCLUDE_GCP_MESSAGE,
+    path: ["targets"],
   });
 
 export type RotateSecretArgs = z.infer<typeof rotateSecretInputSchema>;

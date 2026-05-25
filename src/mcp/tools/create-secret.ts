@@ -18,6 +18,21 @@ export const NAME_PATTERN = /^[A-Za-z][A-Za-z0-9_-]{0,127}$/;
 export const ROTATION_TARGETS = ["gcp", "cf", "github"] as const;
 export type RotationTarget = (typeof ROTATION_TARGETS)[number];
 
+/**
+ * `targets` から `"gcp"` を外せないようにする policy。GCP Secret Manager を
+ * source of truth として運用する規約 (repo CLAUDE.md) を破ると inventory /
+ * snapshot / drift 検出が機能しなくなる (= GH/CF にだけ存在する "orphan"
+ * secret が出る) ため、create / rotate / HTTP upload の全 entry で同じ
+ * check を共有する。
+ */
+export const TARGETS_MUST_INCLUDE_GCP_MESSAGE =
+  "targets must include 'gcp' (GCP is the source of truth; CF/GitHub-only " +
+  "is forbidden because inventory drift detection breaks without a GCP anchor)";
+
+export function targetsIncludeGcp(targets: readonly string[]): boolean {
+  return targets.includes("gcp");
+}
+
 export interface ProviderResult {
   status: "ok" | "fail";
   new_version?: string;
@@ -76,7 +91,11 @@ export const createSecretInputSchema = z
     targets: z
       .array(z.enum(ROTATION_TARGETS))
       .min(1)
-      .default([...ROTATION_TARGETS]),
+      .default([...ROTATION_TARGETS])
+      .describe(
+        "更新対象 provider 群。省略時は 3 system すべて。" +
+          "GCP は source of truth として必ず含めること (= `gcp` を外せない)。",
+      ),
     confirm_name: z.string(),
     fail_if_exists: z
       .boolean()
@@ -91,6 +110,10 @@ export const createSecretInputSchema = z
   .refine((d) => d.confirm_name === d.name, {
     message: "confirm_name does not match name",
     path: ["confirm_name"],
+  })
+  .refine((d) => targetsIncludeGcp(d.targets), {
+    message: TARGETS_MUST_INCLUDE_GCP_MESSAGE,
+    path: ["targets"],
   });
 
 export type CreateSecretArgs = z.infer<typeof createSecretInputSchema>;

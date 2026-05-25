@@ -5,6 +5,8 @@ import {
   executeCreate,
   NAME_PATTERN,
   ROTATION_TARGETS,
+  TARGETS_MUST_INCLUDE_GCP_MESSAGE,
+  targetsIncludeGcp,
   type RotationTarget,
 } from "../mcp/tools/create-secret";
 import { executeRotate } from "../mcp/tools/rotate-secret";
@@ -144,6 +146,12 @@ secretUploadRoutes.put("/mcp/secret-upload/:name", async (c) => {
       { error: "invalid targets (use comma-separated subset of gcp,cf,github)" },
       400,
     );
+  }
+  // GCP は source of truth。`targets` から外すと inventory drift 検出が
+  // 機能しなくなる (= GH/CF にだけ存在する orphan secret が出る) ため
+  // ここで強制 reject する。CLAUDE.md「GCP が正 (source of truth)」参照。
+  if (!targetsIncludeGcp(targets)) {
+    return c.json({ error: TARGETS_MUST_INCLUDE_GCP_MESSAGE }, 400);
   }
 
   // actorEmail は audit log 用。binding_jwt の github_login を渡す

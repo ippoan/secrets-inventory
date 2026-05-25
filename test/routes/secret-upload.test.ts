@@ -204,11 +204,19 @@ describe("PUT /mcp/secret-upload/:name — create mode", () => {
     expect(found).toBe(true);
   });
 
-  it("honors targets=github only", async () => {
+  it("honors targets=gcp,github (CF skipped)", async () => {
     const fetchSpy = vi
       .spyOn(globalThis, "fetch")
       .mockImplementation(async (input) => {
         const url = typeof input === "string" ? input : input.toString();
+        if (url.includes("/create-secret")) {
+          return Response.json({
+            ok: true,
+            name: "FOO",
+            created: true,
+            new_version: "projects/p/secrets/FOO/versions/1",
+          });
+        }
         if (url.includes("/gh/secrets/FOO")) {
           return Response.json({ ok: true });
         }
@@ -216,7 +224,7 @@ describe("PUT /mcp/secret-upload/:name — create mode", () => {
       });
     const app = buildApp(writeClaims);
     const res = await app.fetch(
-      new Request("https://x.invalid/mcp/secret-upload/FOO?targets=github", {
+      new Request("https://x.invalid/mcp/secret-upload/FOO?targets=gcp,github", {
         method: "PUT",
         body: "v",
       }),
@@ -228,22 +236,54 @@ describe("PUT /mcp/secret-upload/:name — create mode", () => {
       results: Record<string, unknown>;
     };
     expect(body.ok).toBe(true);
+    expect(body.results.gcp).toBeDefined();
     expect(body.results.github).toBeDefined();
-    expect(body.results.gcp).toBeUndefined();
     expect(body.results.cf).toBeUndefined();
 
-    // proxy 呼び出しが GitHub だけになっている
+    // CF だけ skip されている (GCP は必須なので外せない)
     const urls = fetchSpy.mock.calls.map(([u]) =>
       typeof u === "string" ? u : u.toString(),
     );
-    expect(urls.some((u) => u.includes("/create-secret"))).toBe(false);
     expect(urls.some((u) => u.includes("/cf/secrets"))).toBe(false);
+    expect(urls.some((u) => u.includes("/create-secret"))).toBe(true);
     expect(urls.some((u) => u.includes("/gh/secrets/FOO"))).toBe(true);
+  });
+
+  it("returns 400 when targets excludes gcp (= GCP source-of-truth enforcement)", async () => {
+    // `targets=github` だけ / `targets=cf,github` / `targets=cf` などを
+    // 投げると、proxy を 1 つも叩く前に 400 で reject される。CLAUDE.md
+    // 「GCP が正 (source of truth)」原則を route 層で機械的に強制する。
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+      return new Response("should not be called", { status: 500 });
+    });
+    const app = buildApp(writeClaims);
+    for (const t of ["github", "cf", "cf,github"]) {
+      const res = await app.fetch(
+        new Request(`https://x.invalid/mcp/secret-upload/FOO?targets=${t}`, {
+          method: "PUT",
+          body: "v",
+        }),
+        env(),
+      );
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error: string };
+      expect(body.error).toMatch(/source of truth|must include 'gcp'/);
+    }
+    // どの proxy も呼ばれていないこと (= request body 読む前に拒否)
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   it("returns 502 when at least one provider fails (partial failure)", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = typeof input === "string" ? input : input.toString();
+      if (url.includes("/create-secret")) {
+        return Response.json({
+          ok: true,
+          name: "FOO",
+          created: true,
+          new_version: "projects/p/secrets/FOO/versions/1",
+        });
+      }
       if (url.includes("/gh/secrets/FOO")) {
         return new Response("gh down", { status: 502 });
       }
@@ -251,7 +291,7 @@ describe("PUT /mcp/secret-upload/:name — create mode", () => {
     });
     const app = buildApp(writeClaims);
     const res = await app.fetch(
-      new Request("https://x.invalid/mcp/secret-upload/FOO?targets=github", {
+      new Request("https://x.invalid/mcp/secret-upload/FOO?targets=gcp,github", {
         method: "PUT",
         body: "v",
       }),
