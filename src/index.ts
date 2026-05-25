@@ -9,6 +9,7 @@ import {
 import { listRoutes } from "./routes/list";
 import { inventoryRoutes } from "./routes/inventory";
 import { serviceAccountsRoutes, handleSaDashboard } from "./routes/service-accounts";
+import { secretUploadRoutes } from "./routes/secret-upload";
 import { handleDashboard } from "./routes/ui";
 import {
   streamableHttpPost,
@@ -48,6 +49,14 @@ app.use("/mcp/*", bindingJwtMiddleware());
 app.post("/mcp", streamableHttpPost);
 app.get("/mcp/sse", legacySseGet);
 app.post("/mcp/sse/message", legacySsePost);
+
+// /mcp/secret-upload/:name : value を HTTP body (raw bytes) で受け取る
+// 代替 entry point。`create_secret` / `rotate_secret` MCP tool の JSON
+// parameter に value を載せたくない (= LLM context に乗せたくない) 用途
+// で、authenticated agent が shell から `curl --data-binary @file` で直接
+// 流す。auth は `/mcp/*` の bindingJwtMiddleware がそのまま効く (mcp.write
+// scope 必須は route 内で再 check)。
+app.route("/", secretUploadRoutes);
 
 // root `/` は突合 dashboard。CF Access middleware を per-route で適用する
 // (`app.use("/", ...)` だと /healthz など全 path にもマッチしてしまうため)。

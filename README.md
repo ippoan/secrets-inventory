@@ -51,6 +51,7 @@ PR を上げると `frontend-ci.yml` 経由で staging に auto-deploy される
 | POST | `/mcp` | MCP read server (Streamable HTTP, 2025-03-26 spec) |
 | GET | `/mcp/sse` | MCP read server legacy SSE (endpoint discovery) |
 | POST | `/mcp/sse/message` | MCP read server legacy SSE ingest |
+| PUT | `/mcp/secret-upload/:name` | secret value を **HTTP body** で受けて `create_secret` / `rotate_secret` と同じ実行経路に流す (LLM context に value を載せない代替経路、mcp.write 必須)。詳細は [§ secret value を LLM context に乗せずに投入する](#secret-value-を-llm-context-に乗せずに投入する) |
 
 ### MCP (read) server (`/mcp*`)
 
@@ -83,6 +84,55 @@ Bearer 値は Cloudflare Secrets Store (`inventory-mcp-bearer`) に格納し、w
 `INVENTORY_MCP_BEARER` binding 経由で読む。Bearer は手動で provisioning し、
 30 日ごとに rotation する想定 (`packages/rotate-mcp/` の dogfooding 拡大時に
 本 read MCP の bearer も rotate 対象に組み込む)。
+
+### secret value を LLM context に乗せずに投入する
+
+MCP の JSON-RPC で `create_secret` / `rotate_secret` を呼ぶと `initial_value` /
+`new_value` parameter が LLM agent の tool-call payload (= LLM の chat
+transcript / log) を経由する。base64 keystore のような大きな秘密値をその経路に
+流すと露出面が広がるため、HTTP body 経由で同じ実行ロジックを叩ける代替経路
+`PUT /mcp/secret-upload/:name` を用意している。
+
+```sh
+# mcp.write scope の binding_jwt を Bearer header に乗せ、value は
+# `--data-binary @file` で curl の標準入力 / file から直接流す。
+# LLM agent の場合は shell tool 経由で実行することで value が tool-call
+# JSON に載らない。
+curl -X PUT \
+  'https://security-inventory.ippoan.org/mcp/secret-upload/HCREADER_RELEASE_KEYSTORE_BASE64?targets=github&fail_if_exists=true' \
+  -H "Authorization: Bearer $MCP_JWT" \
+  --data-binary @/tmp/keystore_b64
+```
+
+Query parameters:
+
+| key | default | 説明 |
+|---|---|---|
+| `mode` | `create` | `create` (新規) または `rotate` (既存 secret に新 version) |
+| `targets` | `gcp,cf,github` | comma-separated subset。github org secret のみ更新したい時は `targets=github` |
+| `fail_if_exists` | `true` | create のみ。`false` で既存 secret 再利用 (= 新 version 投入) |
+| `cf_scopes` | (なし) | create のみ。CF Secrets Store の scopes。例 `cf_scopes=workers` |
+| `expected_gcp_version_id` | (なし) | rotate のみ、TOCTOU 検証 |
+
+レスポンスは `create_secret` / `rotate_secret` MCP tool と同じ JSON 構造
+(`{ok, rotation_id, dry_run: false, results: {gcp, cf, github}}`)。value は
+response にも upstream log にも echo されない。
+
+物理的な value の経路:
+
+```
+shell ($STORE_PW など) → curl --data-binary @file
+                         ↓
+                  worker (memory only、KV/Secret Manager に staging 無し)
+                         ↓
+              既存 executeCreate / executeRotate
+                         ↓
+        secrets-inventory-gcp proxy `/create-secret` or `/add-version`
+                         ↓
+                    GCP Secret Manager (永続化)
+                         ↓
+              proxy `/cf/secrets`, `/gh/secrets/{name}` (伝播)
+```
 
 ### 突合 (`/api/inventory`, `/`)
 
