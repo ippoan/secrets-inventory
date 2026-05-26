@@ -229,3 +229,72 @@ export async function gcpProxyCtxFromEnv(
   const apiKey = await env.GCP_PROXY_API_KEY.get();
   return { proxyUrl: env.GCP_PROXY_URL, apiKey, actorEmail };
 }
+
+export interface GcpMintHealthOAuthJwtResult {
+  status: "ok" | "fail";
+  /** mint 先 secret 名 (proxy 側 hardcode = "HEALTH_OAUTH_JWT") */
+  secret_name?: string;
+  /** 投入された新 version の full name */
+  new_version?: string;
+  /** 初回 mint = true、既存 secret に追加 version = false */
+  created?: boolean;
+  /** 投入した JWT の exp (RFC3339)。値そのものは含まない。 */
+  expires_at?: string;
+  error?: string;
+}
+
+/**
+ * Refs ippoan/auth-worker#209: proxy `POST /mint-health-oauth-jwt` を呼ぶ。
+ *
+ * proxy 側で JWT_SECRET の値を AccessSecretVersion で読み出し、HS256 で署名し
+ * `HEALTH_OAUTH_JWT` secret を GCP Secret Manager に書き込む。Worker は値を
+ * 一切扱わず metadata だけを受け取る。
+ *
+ * 入力 (`JWT_SECRET`) / 出力 (`HEALTH_OAUTH_JWT`) / payload claims すべて
+ * proxy 側に hardcode されているため、リクエスト body は不要。
+ */
+export async function mintHealthOAuthJwt(
+  ctx: GcpProxyContext,
+): Promise<GcpMintHealthOAuthJwtResult> {
+  const url = `${ctx.proxyUrl}/mint-health-oauth-jwt`;
+  const headers = proxyHeaders(ctx);
+
+  let res: Response;
+  try {
+    res = await fetch(url, { method: "POST", headers });
+  } catch (err) {
+    return {
+      status: "fail",
+      error: `gcp proxy network: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+  if (!res.ok) {
+    const body = (await res.text()).slice(0, 200);
+    return { status: "fail", error: `gcp proxy ${res.status}: ${body}` };
+  }
+  let parsed: {
+    ok?: boolean;
+    secret_name?: string;
+    new_version?: string;
+    created?: boolean;
+    expires_at?: string;
+  };
+  try {
+    parsed = (await res.json()) as typeof parsed;
+  } catch (err) {
+    return {
+      status: "fail",
+      error: `gcp proxy bad json: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+  if (!parsed.ok || typeof parsed.new_version !== "string") {
+    return { status: "fail", error: "gcp proxy returned ok=false or missing new_version" };
+  }
+  return {
+    status: "ok",
+    secret_name: parsed.secret_name,
+    new_version: parsed.new_version,
+    created: parsed.created === true,
+    expires_at: parsed.expires_at,
+  };
+}
