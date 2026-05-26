@@ -65,6 +65,16 @@ const HTTP_ROUTES = [
       "Refs ippoan/auth-worker#209。payload (sub, exp) と入出力 secret 名はすべて proxy 側 hardcode。" +
       "binding_jwt の mcp.write scope 必須。",
   },
+  {
+    method: "POST",
+    path: "/mcp/sync-from-gcp/:name",
+    purpose:
+      "GCP Secret Manager にある secret 値を CF Secrets Store / GitHub Actions org secret に伝播する。" +
+      "?targets=gh,cf&gh_name=NAME&cf_name=name&visibility=all&scopes=workers&fail_if_exists=true。" +
+      "値は proxy memory 内のみ (worker / 応答 body / log に echo されない)。" +
+      "source secret の per-secret accessor IAM が runtime SA に grant されている前提。" +
+      "Refs ippoan/secrets-inventory-gcp#34。binding_jwt の mcp.write scope 必須。",
+  },
 ];
 
 const WORKFLOWS = {
@@ -90,15 +100,32 @@ const WORKFLOWS = {
     "kebab name (CF binding 用) と SCREAMING_SNAKE (GitHub 用) を同値で並走させたい場合は 2 path 走らせる (cross-name 規約)。",
   ].join("\n"),
   mint_health_oauth_jwt: [
-    "auth-worker の /health/oauth 用 JWT を mint (Refs ippoan/auth-worker#209):",
+    "auth-worker の /health/oauth 用 JWT を mint + GitHub に伝播 (Refs ippoan/auth-worker#209):",
     "",
-    "  # 1. 事前に operator が JWT_SECRET の per-secret accessor を grant 済の前提",
+    "  # 1. 事前に operator が JWT_SECRET + HEALTH_OAUTH_JWT の per-secret accessor を grant 済の前提",
+    "",
+    "  # 2. mint — proxy 内で HS256 sign し GCP Secret Manager に保存",
     "  curl -X POST \\",
     "    'https://security-inventory.ippoan.org/mcp/mint-health-oauth-jwt' \\",
     "    -H \"Authorization: Bearer $BINDING_JWT\"",
     "",
-    "応答は metadata のみ (value は GCP Secret Manager に landing する)。",
-    "GitHub Actions org secret に反映するには別途 `/sync-from-gcp/HEALTH_OAUTH_JWT?targets=github` を叩く (proxy 側 endpoint、後続 PR)。",
+    "  # 3. sync — GCP → GitHub Actions org secret に伝播 (CI workflow が使う)",
+    "  curl -X POST \\",
+    "    'https://security-inventory.ippoan.org/mcp/sync-from-gcp/HEALTH_OAUTH_JWT?targets=gh' \\",
+    "    -H \"Authorization: Bearer $BINDING_JWT\"",
+    "",
+    "応答はどちらも metadata のみ。value は LLM context / 応答 body / log に echo されない。",
+  ].join("\n"),
+  sync_gcp_to_others: [
+    "任意の GCP secret を CF / GitHub に伝播 (= GCP=source-of-truth の前提を保ったまま伝播):",
+    "",
+    "  # 両方に投入 (kebab / SCREAMING 別名サポート)",
+    "  curl -X POST \\",
+    "    'https://security-inventory.ippoan.org/mcp/sync-from-gcp/MY_SECRET?targets=gh,cf&cf_name=my-secret&fail_if_exists=false' \\",
+    "    -H \"Authorization: Bearer $BINDING_JWT\"",
+    "",
+    "前提: source secret の per-secret accessor が runtime SA に grant 済。",
+    "未 grant なら 502 (upstream error gcp read) が返る。",
   ].join("\n"),
   check_drift: [
     "GitHub / Cloudflare に GCP source-of-truth から外れた secret が無いか確認:",

@@ -298,3 +298,92 @@ export async function mintHealthOAuthJwt(
     expires_at: parsed.expires_at,
   };
 }
+
+export type SyncFromGcpTarget = "gh" | "cf";
+
+export interface SyncFromGcpArgs {
+  /** GCP source secret short name */
+  srcName: string;
+  /** どの provider に伝播させるか */
+  targets: SyncFromGcpTarget[];
+  /** GitHub Actions secret 名 (省略時は srcName) */
+  ghName?: string;
+  /** CF Secrets Store 名 (省略時は srcName) */
+  cfName?: string;
+  /** GitHub visibility — proxy 側 default "all" */
+  visibility?: "all" | "private" | "selected";
+  /** CF scopes — proxy 側 default "workers" */
+  scopes?: string[];
+  /** 既存衝突時の振る舞い — proxy 側 default true */
+  failIfExists?: boolean;
+}
+
+export interface SyncFromGcpProviderResult {
+  status: "ok" | "fail";
+  error?: string;
+  secret_name?: string;
+  secret_id?: string;
+  created?: boolean;
+}
+
+export interface SyncFromGcpResult {
+  status: "ok" | "fail";
+  source?: string;
+  results?: Record<string, SyncFromGcpProviderResult>;
+  error?: string;
+}
+
+/**
+ * Refs ippoan/auth-worker#209 / ippoan/secrets-inventory-gcp#34:
+ * proxy `POST /sync-from-gcp/{src_name}?targets=...` を呼ぶ。
+ *
+ * GCP Secret Manager にある secret 値を、CF Secrets Store / GitHub Actions
+ * org secret に伝播する。値は proxy memory のみで取り回し、worker / response
+ * body / log に echo されない。
+ */
+export async function syncFromGcp(
+  args: SyncFromGcpArgs,
+  ctx: GcpProxyContext,
+): Promise<SyncFromGcpResult> {
+  const u = new URL(`${ctx.proxyUrl}/sync-from-gcp/${encodeURIComponent(args.srcName)}`);
+  u.searchParams.set("targets", args.targets.join(","));
+  if (args.ghName) u.searchParams.set("gh_name", args.ghName);
+  if (args.cfName) u.searchParams.set("cf_name", args.cfName);
+  if (args.visibility) u.searchParams.set("visibility", args.visibility);
+  if (args.scopes && args.scopes.length > 0) {
+    u.searchParams.set("scopes", args.scopes.join(","));
+  }
+  if (args.failIfExists !== undefined) {
+    u.searchParams.set("fail_if_exists", args.failIfExists ? "true" : "false");
+  }
+
+  let res: Response;
+  try {
+    res = await fetch(u.toString(), { method: "POST", headers: proxyHeaders(ctx) });
+  } catch (err) {
+    return {
+      status: "fail",
+      error: `gcp proxy network: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+  // proxy は 全 target ok なら 200、1 つでも fail なら 502 を返すが body
+  // は両方とも詳細な per-target metadata を含む envelope。両方 parse する。
+  let parsed: {
+    ok?: boolean;
+    source?: string;
+    results?: Record<string, SyncFromGcpProviderResult>;
+  };
+  try {
+    parsed = (await res.json()) as typeof parsed;
+  } catch (err) {
+    return {
+      status: "fail",
+      error: `gcp proxy bad json (${res.status}): ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+  return {
+    status: parsed.ok ? "ok" : "fail",
+    source: parsed.source,
+    results: parsed.results,
+  };
+}

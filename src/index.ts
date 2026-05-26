@@ -11,6 +11,7 @@ import { inventoryRoutes } from "./routes/inventory";
 import { serviceAccountsRoutes, handleSaDashboard } from "./routes/service-accounts";
 import { secretUploadRoutes } from "./routes/secret-upload";
 import { mintHealthOAuthJwtRoutes } from "./routes/mint-health-oauth-jwt";
+import { syncFromGcpRoutes } from "./routes/sync-from-gcp";
 import { handleDashboard } from "./routes/ui";
 import {
   streamableHttpPost,
@@ -64,6 +65,12 @@ app.route("/", secretUploadRoutes);
 // 一切扱わず、proxy 内で JWT_SECRET 読み出し → HS256 sign → GCP Secret
 // Manager 書き込みまで完結する。`mcp.write` scope 必須。
 app.route("/", mintHealthOAuthJwtRoutes);
+
+// /mcp/sync-from-gcp/:name : Refs ippoan/secrets-inventory-gcp#34。
+// GCP Secret Manager に既にある値を CF Secrets Store / GitHub Actions org
+// secret に伝播する。proxy `/sync-from-gcp/{name}` への薄い proxy で、worker
+// は値を一切扱わない。`mcp.write` scope 必須。
+app.route("/", syncFromGcpRoutes);
 
 // root `/` は突合 dashboard。CF Access middleware を per-route で適用する
 // (`app.use("/", ...)` だと /healthz など全 path にもマッチしてしまうため)。
