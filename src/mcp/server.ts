@@ -10,45 +10,16 @@ import type { z } from "zod";
 import type { Env } from "../types";
 import type { BindingJwtClaims } from "../middleware/binding-jwt";
 import { GcpUnavailableError } from "../inventory";
-import { listInventoryTool } from "./tools/list-inventory";
-import {
-  listServiceAccountsTool,
-  GcpIamUnavailableError,
-} from "./tools/list-service-accounts";
-import { getDriftTool } from "./tools/get-drift";
-import { getSnapshotTool } from "./tools/get-snapshot";
-import { rotateSecretTool, dryRunRotateTool } from "./tools/rotate-secret";
-import { createSecretTool } from "./tools/create-secret";
+import { GcpIamUnavailableError } from "./tools/list-service-accounts";
+import { readFirstTool } from "./tools/read-first";
+import { STATIC_TOOLS, type ToolEntry } from "./registry";
 
-/**
- * MCP tool entry。`requiresScope` を立てた tool は binding_jwt の scope に
- * その値が含まれていない限り `tools/call` で 403 相当を返す (= write tool は
- * `mcp.write` scope を要求する `rotate_secret` / `create_secret` に使う)。
- *
- * `execute` の 3 引数目 `actorEmail` は binding_jwt の sub から導出した actor
- * email を渡す (= GCP proxy の actor audit log に転送される)。read tool は
- * 受け取らないので無視できる。
- */
-interface ToolEntry<S extends z.ZodTypeAny> {
-  name: string;
-  description: string;
-  inputSchema: S;
-  requiresScope?: string;
-  execute: (env: Env, args: z.infer<S>, actorEmail?: string) => Promise<unknown>;
-}
-
-// `as ToolEntry<z.ZodTypeAny>` で各 tool の zod schema 型情報を unify する。
-// 個別の args 型は execute 内に閉じているので外には漏れない。
+// MCP tool 全体は registry (`STATIC_TOOLS`) + `readFirstTool` を結合したもの。
+// read_first は最初に呼んでもらいたい想定で **先頭** に置き、tools/list で
+// 一番上に出るようにする (= LLM agent の navigation hint)。
 const TOOLS: ToolEntry<z.ZodTypeAny>[] = [
-  listInventoryTool as unknown as ToolEntry<z.ZodTypeAny>,
-  listServiceAccountsTool as unknown as ToolEntry<z.ZodTypeAny>,
-  getDriftTool as unknown as ToolEntry<z.ZodTypeAny>,
-  getSnapshotTool as unknown as ToolEntry<z.ZodTypeAny>,
-  // write tools (Refs #45 Stage 2): packages/rotate-mcp から移植。
-  // requiresScope: "mcp.write" で binding_jwt scope check が走る。
-  rotateSecretTool as unknown as ToolEntry<z.ZodTypeAny>,
-  dryRunRotateTool as unknown as ToolEntry<z.ZodTypeAny>,
-  createSecretTool as unknown as ToolEntry<z.ZodTypeAny>,
+  readFirstTool as unknown as ToolEntry<z.ZodTypeAny>,
+  ...STATIC_TOOLS,
 ];
 
 /**
