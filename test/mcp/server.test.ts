@@ -85,13 +85,14 @@ describe("MCP server (read MCP)", () => {
     expect(result.capabilities.tools).toBeDefined();
   });
 
-  it("tools/list returns all 7 tools (4 read + 3 write) with JSON schemas", async () => {
+  it("tools/list returns all 8 tools (MUST_READ_FIRST + 4 read + 3 write) with JSON schemas", async () => {
     const res = await rpc(env(), { method: "tools/list" });
     const result = res.result as {
       tools: Array<{ name: string; description: string; inputSchema: unknown }>;
     };
     const names = result.tools.map((t) => t.name).sort();
     expect(names).toEqual([
+      "MUST_READ_FIRST_or_other_tools_will_fail",
       "create_secret",
       "dry_run_rotate",
       "get_drift",
@@ -104,6 +105,8 @@ describe("MCP server (read MCP)", () => {
       expect(t.description.length).toBeGreaterThan(0);
       expect(t.inputSchema).toMatchObject({ type: "object" });
     }
+    // MUST_READ_FIRST tool は agent navigation hint として **先頭** に出す。
+    expect(result.tools[0]!.name).toBe("MUST_READ_FIRST_or_other_tools_will_fail");
   });
 
   it("tools/call unknown tool returns isError result", async () => {
