@@ -73,22 +73,27 @@ describe("read_first execute()", () => {
     expect(names).not.toContain("MUST_READ_FIRST_or_other_tools_will_fail");
   });
 
-  it("http_routes mentions secret-upload and mint-health-oauth-jwt (the LLM-context-safe routes)", async () => {
+  it("http_routes lists all LLM-context-safe routes (secret-upload / mint / sync)", async () => {
     const result = (await readFirstTool.execute()) as {
       http_routes: Array<{ path: string }>;
     };
     const paths = result.http_routes.map((r) => r.path);
     expect(paths).toContain("/mcp/secret-upload/:name");
     expect(paths).toContain("/mcp/mint-health-oauth-jwt");
+    expect(paths).toContain("/mcp/sync-from-gcp/:name");
   });
 
-  it("workflows include rotate / create / mint health-oauth / check drift", async () => {
+  it("workflows include rotate / create / mint+sync / sync-only / check drift", async () => {
     const result = (await readFirstTool.execute()) as {
       workflows: Record<string, string>;
     };
     expect(result.workflows.rotate_existing_secret).toMatch(/curl/);
     expect(result.workflows.create_new_secret).toMatch(/curl/);
+    // mint health-oauth workflow walks through mint→sync, so it should
+    // reference both endpoints.
     expect(result.workflows.mint_health_oauth_jwt).toMatch(/mint-health-oauth-jwt/);
+    expect(result.workflows.mint_health_oauth_jwt).toMatch(/sync-from-gcp/);
+    expect(result.workflows.sync_gcp_to_others).toMatch(/sync-from-gcp/);
     expect(result.workflows.check_drift).toMatch(/get_drift/);
   });
 
