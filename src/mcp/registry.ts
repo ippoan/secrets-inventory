@@ -17,6 +17,7 @@ import { getDriftTool } from "./tools/get-drift";
 import { getSnapshotTool } from "./tools/get-snapshot";
 import { rotateSecretTool, dryRunRotateTool } from "./tools/rotate-secret";
 import { createSecretTool } from "./tools/create-secret";
+import { syncFromGcpTool } from "./tools/sync-from-gcp";
 
 export interface ToolEntry<S extends z.ZodTypeAny> {
   name: string;
@@ -44,4 +45,9 @@ export const STATIC_TOOLS: ToolEntry<z.ZodTypeAny>[] = [
   rotateSecretTool as unknown as ToolEntry<z.ZodTypeAny>,
   dryRunRotateTool as unknown as ToolEntry<z.ZodTypeAny>,
   createSecretTool as unknown as ToolEntry<z.ZodTypeAny>,
+  // sync_from_gcp (Refs #57): GCP に既にある値を CF / GitHub にコピーする。
+  // value parameter を持たないので tool-call JSON 経由の context leak は
+  // 構造的にゼロ。既存 HTTP route `POST /mcp/sync-from-gcp/:name` を MCP
+  // tool として expose することで `tools/list` から発見可能にする。
+  syncFromGcpTool as unknown as ToolEntry<z.ZodTypeAny>,
 ];
