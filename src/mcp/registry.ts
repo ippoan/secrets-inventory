@@ -18,6 +18,7 @@ import { getSnapshotTool } from "./tools/get-snapshot";
 import { rotateSecretTool, dryRunRotateTool } from "./tools/rotate-secret";
 import { createSecretTool } from "./tools/create-secret";
 import { syncFromGcpTool } from "./tools/sync-from-gcp";
+import { convertPkcs8Tool } from "./tools/convert-pkcs8";
 
 export interface ToolEntry<S extends z.ZodTypeAny> {
   name: string;
@@ -50,4 +51,8 @@ export const STATIC_TOOLS: ToolEntry<z.ZodTypeAny>[] = [
   // 構造的にゼロ。既存 HTTP route `POST /mcp/sync-from-gcp/:name` を MCP
   // tool として expose することで `tools/list` から発見可能にする。
   syncFromGcpTool as unknown as ToolEntry<z.ZodTypeAny>,
+  // convert_secret_pkcs8 (Refs #59): GCP の PKCS#1 RSA 秘密鍵を PKCS#8 に変換し
+  // 別名で保存 + 任意で GitHub propagate。create-github-app-token@v2 の
+  // "Invalid keyData" 対策。値は proxy 内完結で context に載らない。
+  convertPkcs8Tool as unknown as ToolEntry<z.ZodTypeAny>,
 ];
