@@ -12,6 +12,7 @@ import { serviceAccountsRoutes, handleSaDashboard } from "./routes/service-accou
 import { secretUploadRoutes } from "./routes/secret-upload";
 import { mintHealthOAuthJwtRoutes } from "./routes/mint-health-oauth-jwt";
 import { syncFromGcpRoutes } from "./routes/sync-from-gcp";
+import { convertPkcs8Routes } from "./routes/convert-pkcs8";
 import { handleDashboard } from "./routes/ui";
 import {
   streamableHttpPost,
@@ -71,6 +72,12 @@ app.route("/", mintHealthOAuthJwtRoutes);
 // secret に伝播する。proxy `/sync-from-gcp/{name}` への薄い proxy で、worker
 // は値を一切扱わない。`mcp.write` scope 必須。
 app.route("/", syncFromGcpRoutes);
+
+// /mcp/convert-pkcs8/:name : Refs ippoan/secrets-inventory#59。
+// GCP の RSA 秘密鍵 (PKCS#1) を PKCS#8 に変換し別名で保存 + 任意で GitHub
+// propagate。proxy `/convert-pkcs8/{src}` への薄い proxy で、worker は値を
+// 一切扱わない。`mcp.write` scope 必須。
+app.route("/", convertPkcs8Routes);
 
 // root `/` は突合 dashboard。CF Access middleware を per-route で適用する
 // (`app.use("/", ...)` だと /healthz など全 path にもマッチしてしまうため)。

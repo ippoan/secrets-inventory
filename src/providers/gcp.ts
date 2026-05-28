@@ -387,3 +387,82 @@ export async function syncFromGcp(
     results: parsed.results,
   };
 }
+
+// --- convert-pkcs8 (Refs ippoan/secrets-inventory#59) -----------------------
+
+export type ConvertPkcs8Target = "gcp" | "gh";
+
+export interface ConvertPkcs8Args {
+  /** GCP source secret short name (PKCS#1 RSA 秘密鍵) */
+  srcName: string;
+  /** 変換後 (PKCS#8) を保存する別名。既存なら version-up。 */
+  dstName: string;
+  /** 伝播先。`gcp` 必須 (省略時 ["gcp"])、`gh` 任意。 */
+  targets?: ConvertPkcs8Target[];
+  /** GitHub Actions secret 名 (省略時は dstName) */
+  ghName?: string;
+}
+
+export interface ConvertPkcs8Result {
+  status: "ok" | "fail";
+  source?: string;
+  dst_name?: string;
+  /** false = source は既に PKCS#8 だった (passthrough) */
+  converted?: boolean;
+  results?: Record<string, SyncFromGcpProviderResult>;
+  error?: string;
+}
+
+/**
+ * proxy `POST /convert-pkcs8/{src}?dst_name=...&targets=...&gh_name=...` を呼ぶ。
+ *
+ * GCP の RSA 秘密鍵 (PKCS#1) を PKCS#8 に変換し、別名 dst_name で GCP に作成
+ * (既存なら version-up)、任意で GitHub にも propagate する。値は proxy memory
+ * のみで取り回し、worker / 応答 body / log に echo されない。
+ *
+ * 動機: `actions/create-github-app-token@v2` (WebCrypto) は PKCS#8 のみ受理し、
+ * GitHub App が download させる PKCS#1 鍵だと "Invalid keyData" で落ちる。
+ */
+export async function convertPkcs8(
+  args: ConvertPkcs8Args,
+  ctx: GcpProxyContext,
+): Promise<ConvertPkcs8Result> {
+  const u = new URL(`${ctx.proxyUrl}/convert-pkcs8/${encodeURIComponent(args.srcName)}`);
+  u.searchParams.set("dst_name", args.dstName);
+  if (args.targets && args.targets.length > 0) {
+    u.searchParams.set("targets", args.targets.join(","));
+  }
+  if (args.ghName) u.searchParams.set("gh_name", args.ghName);
+
+  let res: Response;
+  try {
+    res = await fetch(u.toString(), { method: "POST", headers: proxyHeaders(ctx) });
+  } catch (err) {
+    return {
+      status: "fail",
+      error: `gcp proxy network: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+  let parsed: {
+    ok?: boolean;
+    source?: string;
+    dst_name?: string;
+    converted?: boolean;
+    results?: Record<string, SyncFromGcpProviderResult>;
+  };
+  try {
+    parsed = (await res.json()) as typeof parsed;
+  } catch (err) {
+    return {
+      status: "fail",
+      error: `gcp proxy bad json (${res.status}): ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+  return {
+    status: parsed.ok ? "ok" : "fail",
+    source: parsed.source,
+    dst_name: parsed.dst_name,
+    converted: parsed.converted,
+    results: parsed.results,
+  };
+}
