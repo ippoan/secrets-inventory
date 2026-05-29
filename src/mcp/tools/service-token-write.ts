@@ -3,6 +3,7 @@ import type { Env } from "../../types";
 import {
   rotateCloudflareServiceToken,
   deleteCloudflareServiceToken,
+  createCloudflareServiceToken,
   cfProxyCtxFromEnv,
   type CfServiceTokenWriteResult,
 } from "../../providers/cloudflare";
@@ -147,5 +148,74 @@ export const deleteServiceTokenTool = {
     }
     const ctx = await cfProxyCtxFromEnv(env, actorEmail);
     return await deleteCloudflareServiceToken({ tokenId: args.token_id }, ctx);
+  },
+} as const;
+
+// --- create_service_token (Phase 3, Refs #66) ------------------------------
+
+/**
+ * 新規発行する CF service token 名のパターン。命名規約
+ * `{owner}-{system}-{env}-{purpose}-{YYYYMM}` に沿った kebab/snake を enforce
+ * する (= 野良を増やさないための規約強制)。
+ */
+export const TOKEN_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
+
+export const createServiceTokenInputSchema = z
+  .object({
+    name: z
+      .string()
+      .regex(
+        TOKEN_NAME_PATTERN,
+        "name must match ^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$ (命名規約: {owner}-{system}-{env}-{purpose}-{YYYYMM})",
+      )
+      .describe(
+        "発行する service token 名。命名規約 {owner}-{system}-{env}-{purpose}-{YYYYMM} 推奨。",
+      ),
+    sm_secret_name: z
+      .string()
+      .regex(NAME_PATTERN, "sm_secret_name must match ^[A-Za-z][A-Za-z0-9_-]{0,127}$")
+      .describe(
+        "発行時のみ返る client_secret を保管する GCP SM short name。" +
+          "値は proxy→SM 直書きで context に載らない。",
+      ),
+    duration: z
+      .string()
+      .regex(/^[0-9]+h$/, "duration must look like '8760h'")
+      .optional()
+      .describe("CF token duration (e.g. '8760h')。省略時は CF default。"),
+    fail_if_exists: z
+      .boolean()
+      .optional()
+      .describe("SM 側既存衝突を 409(true) か 既存再利用=新 version(false)。default false。"),
+  })
+  .strict();
+
+export type CreateServiceTokenArgs = z.infer<typeof createServiceTokenInputSchema>;
+
+export const createServiceTokenTool = {
+  name: "create_service_token",
+  description:
+    "CF Access Service Token を新規発行する。発行時のみ返る client_secret は " +
+    "proxy が GCP Secret Manager の sm_secret_name に直書きし、**LLM context / " +
+    "response / log に一切載らない**。name は命名規約 " +
+    "{owner}-{system}-{env}-{purpose}-{YYYYMM} 寄りの kebab/snake を enforce。" +
+    "発行後に Access policy (Service Auth) への割り当ては別途必要。Refs #66。",
+  inputSchema: createServiceTokenInputSchema,
+  requiresScope: "mcp.write" as const,
+  execute: async (
+    env: Env,
+    args: CreateServiceTokenArgs,
+    actorEmail?: string,
+  ): Promise<CfServiceTokenWriteResult> => {
+    const ctx = await cfProxyCtxFromEnv(env, actorEmail);
+    return await createCloudflareServiceToken(
+      {
+        name: args.name,
+        smSecretName: args.sm_secret_name,
+        duration: args.duration,
+        failIfExists: args.fail_if_exists,
+      },
+      ctx,
+    );
   },
 } as const;
