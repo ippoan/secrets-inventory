@@ -71,6 +71,26 @@ describe("service-token-write schemas", () => {
       }).success,
     ).toBe(false);
   });
+
+  it("delete: accepts optional sm_secret_name", () => {
+    expect(
+      deleteServiceTokenInputSchema.safeParse({
+        token_id: TOKEN_ID,
+        sm_secret_name: "foo-client-secret",
+        confirm_token_id: TOKEN_ID,
+      }).success,
+    ).toBe(true);
+  });
+
+  it("delete: rejects invalid sm_secret_name", () => {
+    expect(
+      deleteServiceTokenInputSchema.safeParse({
+        token_id: TOKEN_ID,
+        sm_secret_name: "bad name!",
+        confirm_token_id: TOKEN_ID,
+      }).success,
+    ).toBe(false);
+  });
 });
 
 describe("parseProtectedTokenIds", () => {
@@ -148,6 +168,30 @@ describe("delete_service_token execute", () => {
     })) as { status: string; token_id?: string };
     expect(res.status).toBe("ok");
     expect(res.token_id).toBe(TOKEN_ID);
+    expect(fetchSpy).toHaveBeenCalledOnce();
+  });
+
+  it("passes sm_secret_name as query and surfaces label_applied", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = typeof input === "string" ? input : input.toString();
+      expect(url).toBe(
+        `https://gcp-stub.run.app/cf/service-tokens/${TOKEN_ID}?sm_secret_name=foo-client-secret`,
+      );
+      expect(init?.method).toBe("DELETE");
+      return Response.json({
+        ok: true,
+        token_id: TOKEN_ID,
+        sm_secret_name: "foo-client-secret",
+        label_applied: true,
+      });
+    });
+    const res = (await deleteServiceTokenTool.execute(baseTestEnv() as Env, {
+      token_id: TOKEN_ID,
+      sm_secret_name: "foo-client-secret",
+      confirm_token_id: TOKEN_ID,
+    })) as { status: string; label_applied?: boolean };
+    expect(res.status).toBe("ok");
+    expect(res.label_applied).toBe(true);
     expect(fetchSpy).toHaveBeenCalledOnce();
   });
 

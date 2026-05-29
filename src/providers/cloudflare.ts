@@ -340,6 +340,8 @@ export interface CfServiceTokenWriteResult {
   sm_secret_name?: string;
   sm_version?: string;
   created?: boolean;
+  /** delete のみ: 対象 SM secret に `cf_service_token=deleted` label を打てたか。 */
+  label_applied?: boolean;
   error?: string;
 }
 
@@ -409,22 +411,32 @@ export async function rotateCloudflareServiceToken(
 
 export interface CfDeleteServiceTokenArgs {
   tokenId: string;
+  /**
+   * 任意。渡すと revoke 成功後に、この client_secret 保管 SM secret へ
+   * `cf_service_token=deleted` audit label を打つ (= 台帳が空でも明示渡しで
+   * 対象 secret を特定できる経路、Refs #68)。値・version には触れず label
+   * メタデータのみ。proxy 側 query `?sm_secret_name=` に載せる。
+   */
+  smSecretName?: string;
 }
 
 /**
- * service token を delete (= 野良 token revoke)。値・SM 連携なし。
- * 失敗は status="fail" で返し throw しない。
+ * service token を delete (= 野良 token revoke)。`smSecretName` を渡すと
+ * revoke 後に該当 SM secret へ `cf_service_token=deleted` audit label を打つ
+ * (proxy 側で patch、worker は値に触れない)。失敗は status="fail" で返し
+ * throw しない。
  */
 export async function deleteCloudflareServiceToken(
   args: CfDeleteServiceTokenArgs,
   ctx: CfProxyContext,
 ): Promise<CfServiceTokenWriteResult> {
+  let url = `${ctx.proxyUrl}/cf/service-tokens/${encodeURIComponent(args.tokenId)}`;
+  if (args.smSecretName) {
+    url += `?sm_secret_name=${encodeURIComponent(args.smSecretName)}`;
+  }
   let res: Response;
   try {
-    res = await fetch(
-      `${ctx.proxyUrl}/cf/service-tokens/${encodeURIComponent(args.tokenId)}`,
-      { method: "DELETE", headers: proxyHeaders(ctx) },
-    );
+    res = await fetch(url, { method: "DELETE", headers: proxyHeaders(ctx) });
   } catch (err) {
     return {
       status: "fail",
@@ -435,7 +447,12 @@ export async function deleteCloudflareServiceToken(
     const body = (await res.text()).slice(0, 200);
     return { status: "fail", error: `cf proxy ${res.status}: ${body}` };
   }
-  let parsed: { ok?: boolean; token_id?: string };
+  let parsed: {
+    ok?: boolean;
+    token_id?: string;
+    sm_secret_name?: string;
+    label_applied?: boolean;
+  };
   try {
     parsed = (await res.json()) as typeof parsed;
   } catch (err) {
@@ -447,7 +464,12 @@ export async function deleteCloudflareServiceToken(
   if (!parsed.ok || typeof parsed.token_id !== "string") {
     return { status: "fail", error: "cf proxy returned ok=false or missing token_id" };
   }
-  return { status: "ok", token_id: parsed.token_id };
+  return {
+    status: "ok",
+    token_id: parsed.token_id,
+    sm_secret_name: parsed.sm_secret_name,
+    label_applied: parsed.label_applied,
+  };
 }
 
 export interface CfCreateServiceTokenArgs {
