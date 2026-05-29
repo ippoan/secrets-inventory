@@ -71,6 +71,19 @@
       "id": "e23574b972844be4b8b5624e67d4eb56"
     }
   ],
+  // DO + WebSocket (stateful) MCP transport (Refs #70, dual-path /mcp-do)。
+  // class は src/index.ts が re-export する `SecretsInventoryMcp`
+  // (src/mcp/durable.ts, agents SDK McpAgent ベース)。agents の McpAgent は
+  // SQLite-backed DO なので new_sqlite_classes で migrate する。named env
+  // (staging) は binding/migration を継承しないため env.staging にも複製する。
+  "durable_objects": {
+    "bindings": [
+      { "name": "MCP_DO", "class_name": "SecretsInventoryMcp" }
+    ]
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["SecretsInventoryMcp"] }
+  ],
   "env": {
     "staging": {
       "name": "secrets-inventory-staging",
@@ -102,6 +115,14 @@
           "binding": "SNAPSHOT_KV",
           "id": "e23574b972844be4b8b5624e67d4eb56"
         }
+      ],
+      "durable_objects": {
+        "bindings": [
+          { "name": "MCP_DO", "class_name": "SecretsInventoryMcp" }
+        ]
+      },
+      "migrations": [
+        { "tag": "v1", "new_sqlite_classes": ["SecretsInventoryMcp"] }
       ]
     }
   }

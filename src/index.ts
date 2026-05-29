@@ -19,6 +19,7 @@ import {
   legacySseGet,
   legacySsePost,
 } from "./mcp/http-handler";
+import { handleDurableMcp } from "./mcp/durable";
 
 type AppVariables = { cfAccess: CfAccessClaims; bindingJwt: BindingJwtClaims };
 
@@ -52,6 +53,12 @@ app.use("/mcp/*", bindingJwtMiddleware());
 app.post("/mcp", streamableHttpPost);
 app.get("/mcp/sse", legacySseGet);
 app.post("/mcp/sse/message", legacySsePost);
+
+// /mcp-do : DO + WebSocket (stateful) MCP transport (Refs #70, dual-path)。
+// 既存 stateless `/mcp` と併存。Streamable HTTP は同 path で POST/GET/DELETE を
+// 使うため app.all で受ける。auth (binding_jwt) は handleDurableMcp が edge で
+// 行う (`/mcp-do` は上の `/mcp` / `/mcp/*` middleware にマッチしない別 path)。
+app.all("/mcp-do", (c) => handleDurableMcp(c.req.raw, c.env, c.executionCtx));
 
 // /mcp/secret-upload/:name : value を HTTP body (raw bytes) で受け取る
 // 代替 entry point。`create_secret` / `rotate_secret` MCP tool の JSON
@@ -89,5 +96,9 @@ app.get("/service-accounts", cfAccessMiddleware(), handleSaDashboard);
 app.route("/api", listRoutes);
 app.route("/api", inventoryRoutes);
 app.route("/api", serviceAccountsRoutes);
+
+// DO + WebSocket MCP transport の Durable Object class。wrangler は worker entry
+// の named export として DO class を要求する (durable_objects.bindings.class_name)。
+export { SecretsInventoryMcp } from "./mcp/durable";
 
 export default app;

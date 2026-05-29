@@ -10,6 +10,14 @@ export function mockSecret(value: string): SecretsStoreSecret {
 }
 
 /**
+ * DO + WebSocket MCP transport (`/mcp-do`, Refs #70) の binding stub。stateless
+ * route / inventory 系 test は DO を呼ばないため duck-typing の空 stub で十分。
+ */
+export function mockDurableObjectNamespace(): DurableObjectNamespace {
+  return {} as unknown as DurableObjectNamespace;
+}
+
+/**
  * 各 test で個別 field を override しやすいよう、KV を除いた共通
  * `Env` 部分だけを返す。SNAPSHOT_KV は test ごとに独自 mock を入れたいため
  * 含めない。MCP_* は MCP route が増えてから全 test の Env literal に手書き
@@ -35,6 +43,7 @@ export function baseTestEnv(
     MCP_SERVER_VERSION: "0.0.2",
     MCP_PROTOCOL_VERSION: "2025-03-26",
     AUTH_WORKER_ORIGIN: "https://auth.invalid",
+    MCP_DO: mockDurableObjectNamespace(),
     ...overrides,
   };
 }

@@ -24,6 +24,10 @@ jobs:
     uses: ippoan/ci-workflows/.github/workflows/frontend-ci.yml@main
     with:
       project_type: 'worker'
+      # @ippoan/mcp-cf-workers (DO+WS lib) は GitHub Packages 公開。setup-node に
+      # registry + NODE_AUTH_TOKEN(=GITHUB_TOKEN) を構成させ install/deploy 両 job
+      # で pull できるようにする (permissions.packages: read 必須、上で宣言済み)。
+      npm_scope: '@ippoan'
       install_command: 'npm install'
       typecheck_command: 'npx tsc --noEmit'
       deploy_staging_script: 'npx wrangler deploy --env staging'

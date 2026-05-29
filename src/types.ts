@@ -63,4 +63,9 @@ export interface Env {
   MCP_SERVER_VERSION: string;
   MCP_PROTOCOL_VERSION: string;
   AUTH_WORKER_ORIGIN: string;
+
+  // DO + WebSocket (stateful) MCP transport (Refs #70)。dual-path で `/mcp-do`
+  // に追加した DO session の binding。class は `SecretsInventoryMcp`
+  // (src/mcp/durable.ts)。wrangler.jsonc の durable_objects + migration で登録。
+  MCP_DO: DurableObjectNamespace;
 }

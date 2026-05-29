@@ -27,6 +27,7 @@ const baseEnv: Env = {
   MCP_SERVER_VERSION: "0.0.1",
   MCP_PROTOCOL_VERSION: "2025-03-26",
   AUTH_WORKER_ORIGIN: "https://auth.invalid",
+  MCP_DO: {} as unknown as DurableObjectNamespace,
 };
 
 function buildApp() {

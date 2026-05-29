@@ -45,3 +45,25 @@ PR テンプレートは `.github/pull_request_template.md` で `Refs` を強制
   `requiresScope: "mcp.write"` を立て、binding_jwt の scope が `mcp.write`
   を含まないと 403 相当を返す (= 同一 `/mcp` route 上で read/write を分離
   認可)。Refs #45 Stage 2 で旧 `secrets-rotate-mcp` worker は廃止
+
+## MCP transport: stateless `/mcp` と stateful `/mcp-do` の dual-path (Refs #70)
+
+- 「worker 最小・ロジックは proxy 集約」方針の **意図的例外**として、stateful な
+  Durable Object (`SecretsInventoryMcp`, agents SDK `McpAgent` ベース) を 1 個
+  持ち込む。これは ippoan/mcp-cf-workers#6 の DO+WS transport を consume するもの。
+- 理由: stateless `/mcp` は deploy 時に live session の `tools/list` が旧 schema で
+  凍結する (#70 実害)。DO+WS の `/mcp-do` は deploy で WS drop → Claude Code 自動
+  再接続 → initialize/tools/list 再取得、で新 schema を引ける (Gate A、実証済み)。
+- **dual-path 段階移行**: 既存 `/mcp` (`src/mcp/http-handler.ts` + `transport.ts`)
+  は温存し、`/mcp-do` (`src/mcp/durable.ts`) を併設。tool 群は同一 registry
+  (`src/mcp/registry.ts`) を single source として両 path が共有する。staging で
+  Gate A を実証してから本番 `/mcp` の切替を判断する。
+- runtime の `notifications/tools/list_changed` push は Claude Code クライアントが
+  未消費なので当てにしない (ippoan/mcp-cf-workers#12 で wire 実証 + upstream
+  anthropics/claude-code#4118 既知問題)。`/mcp-do` の価値は deploy→reconnect のみ。
+- DO+WS lib (`@ippoan/mcp-cf-workers`) は GitHub Packages の `dev` dist-tag を
+  consume する。CI/deploy は `frontend-ci.yml` の `npm_scope: '@ippoan'` +
+  `permissions.packages: read` で pull する (`.npmrc` 同梱)。
+- 認可は stateless 版と同一: edge の `introspectBindingJwt` (binding_jwt 検証) が
+  返す `scope` を DO session の `props` に載せ、write tool を `requiresScope` で
+  gate する。

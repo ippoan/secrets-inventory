@@ -77,7 +77,26 @@ export interface BindingJwtMiddlewareOptions {
 // 使えず、"Couldn't reach the MCP server" で setup 失敗していた (Refs #45)。
 const RESOURCE_METADATA_SLUG = "security-inventory";
 
-function wwwAuthenticate(authOrigin: string, error?: string): string {
+export { DEFAULT_AUTH_WORKER_ORIGIN };
+
+/**
+ * binding_jwt 検証失敗を表す error。`status` は HTTP status (401 / 503)、
+ * `errorCode` は RFC 6750 の `error=` パラメータ (401 のみ; 503 は null)。
+ * Hono middleware / DO authenticate hook の双方がこれを catch して適切な
+ * Response (WWW-Authenticate 付き 401 / 503) に変換する。
+ */
+export class BindingJwtError extends Error {
+  constructor(
+    readonly status: 401 | 503,
+    readonly errorCode: string | null,
+    message: string,
+  ) {
+    super(message);
+    this.name = "BindingJwtError";
+  }
+}
+
+export function wwwAuthenticate(authOrigin: string, error?: string): string {
   // RFC 6750 + RFC 9728 (Protected Resource Metadata)。claude.ai connector は
   // `resource_metadata` を辿って AS を auto-discover する。
   const base = `Bearer realm="MCP", resource_metadata="${authOrigin}/.well-known/oauth-protected-resource/${RESOURCE_METADATA_SLUG}"`;
@@ -98,8 +117,98 @@ function unauthorized(
 }
 
 /**
+ * `Authorization: Bearer <binding_jwt>` を auth-worker `/mcp/introspect` で検証し
+ * claims を返す。framework 非依存 (Hono middleware と DO authenticate hook の
+ * 双方から使う)。失敗時は {@link BindingJwtError} を throw する。
+ *
+ * - header 欠落 / scheme 不正 / empty → 401 invalid_token
+ * - fetch 失敗 / introspect 503 / 非 ok / 不正 JSON / claims 欠落 → 503 (fail-closed)
+ * - active:false / 401 / aud mismatch → 401 invalid_token
+ */
+export async function introspectBindingJwt(
+  authHeader: string | null | undefined,
+  env: Env,
+  options: BindingJwtMiddlewareOptions = {},
+): Promise<BindingJwtClaims> {
+  const authOrigin =
+    options.authWorkerOrigin ?? env.AUTH_WORKER_ORIGIN ?? DEFAULT_AUTH_WORKER_ORIGIN;
+
+  if (!authHeader || !authHeader.startsWith(SCHEME_PREFIX)) {
+    throw new BindingJwtError(
+      401,
+      "invalid_token",
+      "missing or malformed Authorization: Bearer header",
+    );
+  }
+  const token = authHeader.slice(SCHEME_PREFIX.length);
+  if (!token) {
+    throw new BindingJwtError(401, "invalid_token", "empty bearer token");
+  }
+
+  const fetchImpl = options.introspectFetch ?? fetch;
+  let resp: Response;
+  try {
+    resp = await fetchImpl(`${authOrigin}/mcp/introspect`, {
+      method: "POST",
+      headers: {
+        "Authorization": authHeader,
+        "Content-Type": "application/json",
+      },
+      body: "{}",
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new BindingJwtError(503, null, `introspect fetch failed: ${msg}`);
+  }
+
+  if (resp.status === 503) {
+    throw new BindingJwtError(503, null, "auth-worker introspect 503 (server misconfigured)");
+  }
+  if (resp.status === 401) {
+    throw new BindingJwtError(401, "invalid_token", "invalid bearer token");
+  }
+  if (!resp.ok) {
+    throw new BindingJwtError(503, null, `introspect failed: HTTP ${resp.status}`);
+  }
+
+  let body: { active?: unknown; scope?: unknown; sub?: unknown;
+              github_login?: unknown; exp?: unknown; aud?: unknown };
+  try {
+    body = (await resp.json()) as typeof body;
+  } catch {
+    throw new BindingJwtError(503, null, "introspect returned invalid JSON");
+  }
+
+  if (body.active !== true) {
+    throw new BindingJwtError(401, "invalid_token", "token not active");
+  }
+
+  if (
+    typeof body.sub !== "string" ||
+    typeof body.github_login !== "string" ||
+    typeof body.scope !== "string" ||
+    typeof body.exp !== "number"
+  ) {
+    throw new BindingJwtError(503, null, "introspect response missing required claims");
+  }
+
+  if (options.expectedAud && typeof body.aud === "string"
+      && !options.expectedAud.includes(body.aud)) {
+    throw new BindingJwtError(401, "invalid_token", "aud not in allowlist");
+  }
+
+  return {
+    sub: body.sub,
+    github_login: body.github_login,
+    scope: body.scope,
+    exp: body.exp,
+  };
+}
+
+/**
  * binding_jwt (auth-worker mint) を `/mcp/introspect` 経由で検証する Hono
- * middleware。
+ * middleware。検証ロジック本体は {@link introspectBindingJwt} に集約し、ここでは
+ * Hono Context への WWW-Authenticate / claims set だけを担う。
  *
  * - header 欠落 / scheme 不正 → 401 + WWW-Authenticate
  * - introspect 503 / fetch 失敗 → 503 (fail-closed)
@@ -116,87 +225,20 @@ export function bindingJwtMiddleware(
     const authOrigin =
       options.authWorkerOrigin ?? c.env.AUTH_WORKER_ORIGIN ?? DEFAULT_AUTH_WORKER_ORIGIN;
 
-    const header = c.req.header("Authorization");
-    if (!header || !header.startsWith(SCHEME_PREFIX)) {
-      return unauthorized(
-        c,
-        authOrigin,
-        "invalid_token",
-        "missing or malformed Authorization: Bearer header",
-      );
-    }
-    const token = header.slice(SCHEME_PREFIX.length);
-    if (!token) {
-      return unauthorized(c, authOrigin, "invalid_token", "empty bearer token");
-    }
-
-    const fetchImpl = options.introspectFetch ?? fetch;
-    let resp: Response;
+    let claims: BindingJwtClaims;
     try {
-      resp = await fetchImpl(`${authOrigin}/mcp/introspect`, {
-        method: "POST",
-        headers: {
-          "Authorization": header,
-          "Content-Type": "application/json",
-        },
-        body: "{}",
-      });
+      claims = await introspectBindingJwt(c.req.header("Authorization"), c.env, options);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      return c.json(
-        { error: `introspect fetch failed: ${msg}` },
-        503,
-      );
+      if (err instanceof BindingJwtError) {
+        if (err.status === 401) {
+          return unauthorized(c, authOrigin, err.errorCode ?? "invalid_token", err.message);
+        }
+        return c.json({ error: err.message }, 503);
+      }
+      throw err;
     }
 
-    if (resp.status === 503) {
-      return c.json(
-        { error: "auth-worker introspect 503 (server misconfigured)" },
-        503,
-      );
-    }
-    if (resp.status === 401) {
-      return unauthorized(c, authOrigin, "invalid_token", "invalid bearer token");
-    }
-    if (!resp.ok) {
-      return c.json(
-        { error: `introspect failed: HTTP ${resp.status}` },
-        503,
-      );
-    }
-
-    let body: { active?: unknown; scope?: unknown; sub?: unknown;
-                github_login?: unknown; exp?: unknown; aud?: unknown };
-    try {
-      body = (await resp.json()) as typeof body;
-    } catch {
-      return c.json({ error: "introspect returned invalid JSON" }, 503);
-    }
-
-    if (body.active !== true) {
-      return unauthorized(c, authOrigin, "invalid_token", "token not active");
-    }
-
-    if (
-      typeof body.sub !== "string" ||
-      typeof body.github_login !== "string" ||
-      typeof body.scope !== "string" ||
-      typeof body.exp !== "number"
-    ) {
-      return c.json({ error: "introspect response missing required claims" }, 503);
-    }
-
-    if (options.expectedAud && typeof body.aud === "string"
-        && !options.expectedAud.includes(body.aud)) {
-      return unauthorized(c, authOrigin, "invalid_token", "aud not in allowlist");
-    }
-
-    c.set("bindingJwt", {
-      sub: body.sub,
-      github_login: body.github_login,
-      scope: body.scope,
-      exp: body.exp,
-    });
+    c.set("bindingJwt", claims);
     await next();
   };
 }
