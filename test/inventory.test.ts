@@ -59,6 +59,7 @@ function installFetchMock(handlers: {
   gcp?: () => Response;
   github?: () => Response;
   cloudflare?: () => Response;
+  serviceTokens?: () => Response;
 }) {
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
     const url = typeof input === "string" ? input : input.toString();
@@ -70,6 +71,13 @@ function installFetchMock(handlers: {
     }
     if (url.includes("/gh/secrets")) {
       return handlers.github ? handlers.github() : Response.json({ secrets: [] });
+    }
+    // /cf/service-tokens を /cf/secrets より先に判定する (前者は後者を部分文字列に
+    // 含まないが、意図を明示するため CF service token を先に分岐させる)。
+    if (url.includes("/cf/service-tokens")) {
+      return handlers.serviceTokens
+        ? handlers.serviceTokens()
+        : Response.json({ service_tokens: [] });
     }
     if (url.includes("/cf/secrets")) {
       return handlers.cloudflare ? handlers.cloudflare() : Response.json({ secrets: [] });
@@ -236,5 +244,83 @@ describe("gatherInventory — snapshot commit", () => {
     const result = await gatherInventory(makeEnv(kv));
     expect(result.snapshot_committed).toBe(false);
     expect(putSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe("gatherInventory — service tokens (Refs #62)", () => {
+  it("reconciles CF service tokens against GCP cf_token_id labels", async () => {
+    installFetchMock({
+      gcp: () =>
+        Response.json({
+          secrets: [
+            {
+              name: "testone-client-secret",
+              created_at: "2026-01-01T00:00:00Z",
+              labels: { cf_token_id: "st-ok" },
+            },
+            {
+              name: "ghost-secret",
+              created_at: "2026-01-01T00:00:00Z",
+              labels: { cf_token_id: "st-gone" },
+            },
+          ],
+        }),
+      serviceTokens: () =>
+        Response.json({
+          service_tokens: [
+            { id: "st-ok", name: "testone", client_id: "abc.access" },
+            { id: "st-wild", name: "wild" },
+          ],
+        }),
+    });
+    const result = await gatherInventory(makeEnv(makeKv().kv));
+
+    expect(result.provider_counts.service_tokens).toBe(2);
+    expect(result.errors.service_tokens).toBeUndefined();
+
+    const rows = result.service_tokens.rows;
+    const statuses = rows.map((r) => r.status).sort();
+    expect(statuses).toEqual(["missing_in_cf", "ok", "orphan"]);
+
+    const ok = rows.find((r) => r.status === "ok");
+    expect(ok?.cf?.name).toBe("testone");
+    expect(ok?.gcp?.name).toBe("testone-client-secret");
+
+    const orphan = rows.find((r) => r.status === "orphan");
+    expect(orphan?.cf?.name).toBe("wild");
+    expect(orphan?.gcp).toBeNull();
+
+    const missing = rows.find((r) => r.status === "missing_in_cf");
+    expect(missing?.gcp?.name).toBe("ghost-secret");
+    expect(missing?.cf).toBeNull();
+  });
+
+  it("service token fetch fail → errors.service_tokens + counts null + rows empty", async () => {
+    installFetchMock({
+      gcp: () =>
+        Response.json({
+          secrets: [
+            { name: "x", labels: { cf_token_id: "st-1" } },
+          ],
+        }),
+      serviceTokens: () => new Response("forbidden", { status: 403 }),
+    });
+    const result = await gatherInventory(makeEnv(makeKv().kv));
+
+    expect(result.errors.service_tokens).toMatch(/403/);
+    expect(result.provider_counts.service_tokens).toBeNull();
+    // 突合不能 = 誤検出しない (missing_in_cf を出さない)
+    expect(result.service_tokens.rows).toEqual([]);
+  });
+
+  it("does not affect secret rows / errors when service tokens are empty", async () => {
+    installFetchMock({
+      gcp: () => Response.json({ secrets: [{ name: "A" }] }),
+    });
+    const result = await gatherInventory(makeEnv(makeKv().kv));
+    expect(result.rows.map((r) => r.name)).toEqual(["A"]);
+    expect(result.errors).toEqual({});
+    expect(result.provider_counts.service_tokens).toBe(0);
+    expect(result.service_tokens.rows).toEqual([]);
   });
 });
