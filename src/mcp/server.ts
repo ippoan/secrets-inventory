@@ -5,8 +5,7 @@ import {
   type CallToolResult,
   type Tool,
 } from "@modelcontextprotocol/sdk/types.js";
-import { zodToJsonSchema } from "zod-to-json-schema";
-import type { z } from "zod";
+import { z } from "zod";
 import type { Env } from "../types";
 import type { BindingJwtClaims } from "../middleware/binding-jwt";
 import { GcpUnavailableError } from "../inventory";
@@ -87,9 +86,11 @@ export function createMcpServer(env: Env, claims?: BindingJwtClaims): Server {
 }
 
 function toMcpTool(entry: ToolEntry<z.ZodTypeAny>): Tool {
-  const jsonSchema = zodToJsonSchema(entry.inputSchema, {
-    target: "jsonSchema7",
-    $refStrategy: "none",
+  // zod 4 native の JSON Schema 変換。`target: "draft-7"` で旧 `zod-to-json-schema`
+  // の `target: "jsonSchema7"` 相当。`reused` は default "inline" なので旧
+  // `$refStrategy: "none"` (= $ref を使わず展開) と同じ挙動になる。
+  const jsonSchema = z.toJSONSchema(entry.inputSchema, {
+    target: "draft-7",
   }) as Tool["inputSchema"];
   return {
     name: entry.name,
