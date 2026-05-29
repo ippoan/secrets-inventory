@@ -4,6 +4,8 @@ import {
   listCloudflareServiceTokens,
   rotateCloudflare,
   createCloudflare,
+  rotateCloudflareServiceToken,
+  deleteCloudflareServiceToken,
   CloudflareProxyError,
   type CfProxyContext,
 } from "../../src/providers/cloudflare";
@@ -245,5 +247,73 @@ describe("listCloudflareServiceTokens (via proxy)", () => {
     await expect(listCloudflareServiceTokens(ctx)).rejects.toThrow(
       CloudflareProxyError,
     );
+  });
+});
+
+describe("rotateCloudflareServiceToken (via proxy)", () => {
+  it("POSTs /cf/service-tokens/{id}/rotate with sm_secret_name and returns metadata (no secret)", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = typeof input === "string" ? input : input.toString();
+      expect(url).toBe("https://gcp-stub.run.app/cf/service-tokens/st-1/rotate");
+      expect(init?.method).toBe("POST");
+      return Response.json({
+        ok: true,
+        token_id: "st-1",
+        client_id: "abc.access",
+        expires_at: "2027-01-01T00:00:00Z",
+        client_secret_version: 2,
+        sm_secret_name: "foo-client-secret",
+        sm_version: "projects/p/secrets/foo-client-secret/versions/3",
+        created: false,
+      });
+    });
+    const res = await rotateCloudflareServiceToken(
+      { tokenId: "st-1", smSecretName: "foo-client-secret" },
+      ctx,
+    );
+    expect(res.status).toBe("ok");
+    expect(res.token_id).toBe("st-1");
+    expect(res.sm_version).toContain("versions/3");
+    expect(res.created).toBe(false);
+    // request body に sm_secret_name + fail_if_exists が乗る (client_secret は扱わない)
+    const body = JSON.parse((fetchSpy.mock.calls[0]?.[1] as RequestInit).body as string);
+    expect(body).toEqual({ sm_secret_name: "foo-client-secret", fail_if_exists: false });
+    // 戻り値に client_secret 的フィールドが無い
+    expect(JSON.stringify(res)).not.toContain("client_secret\"");
+  });
+
+  it("fail on non-2xx proxy", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("scope", { status: 502 }));
+    const res = await rotateCloudflareServiceToken({ tokenId: "st-1", smSecretName: "foo" }, ctx);
+    expect(res.status).toBe("fail");
+    expect(res.error).toMatch(/502/);
+  });
+
+  it("fail when proxy returns ok=false", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json({ ok: false }));
+    const res = await rotateCloudflareServiceToken({ tokenId: "st-1", smSecretName: "foo" }, ctx);
+    expect(res.status).toBe("fail");
+  });
+});
+
+describe("deleteCloudflareServiceToken (via proxy)", () => {
+  it("DELETEs /cf/service-tokens/{id} and returns ok", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = typeof input === "string" ? input : input.toString();
+      expect(url).toBe("https://gcp-stub.run.app/cf/service-tokens/st-9");
+      expect(init?.method).toBe("DELETE");
+      return Response.json({ ok: true, token_id: "st-9" });
+    });
+    const res = await deleteCloudflareServiceToken({ tokenId: "st-9" }, ctx);
+    expect(res.status).toBe("ok");
+    expect(res.token_id).toBe("st-9");
+    expect(fetchSpy).toHaveBeenCalledOnce();
+  });
+
+  it("fail on non-2xx proxy", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("boom", { status: 502 }));
+    const res = await deleteCloudflareServiceToken({ tokenId: "st-9" }, ctx);
+    expect(res.status).toBe("fail");
+    expect(res.error).toMatch(/502/);
   });
 });

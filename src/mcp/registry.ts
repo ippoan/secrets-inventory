@@ -19,6 +19,10 @@ import { rotateSecretTool, dryRunRotateTool } from "./tools/rotate-secret";
 import { createSecretTool } from "./tools/create-secret";
 import { syncFromGcpTool } from "./tools/sync-from-gcp";
 import { convertPkcs8Tool } from "./tools/convert-pkcs8";
+import {
+  rotateServiceTokenTool,
+  deleteServiceTokenTool,
+} from "./tools/service-token-write";
 
 export interface ToolEntry<S extends z.ZodTypeAny> {
   name: string;
@@ -55,4 +59,9 @@ export const STATIC_TOOLS: ToolEntry<z.ZodTypeAny>[] = [
   // 別名で保存 + 任意で GitHub propagate。create-github-app-token@v2 の
   // "Invalid keyData" 対策。値は proxy 内完結で context に載らない。
   convertPkcs8Tool as unknown as ToolEntry<z.ZodTypeAny>,
+  // Phase 2 (Refs #64): CF Access Service Token の rotate / delete。
+  // requiresScope: "mcp.write" + type-to-confirm + protected-id ガード付き。
+  // rotate の新 client_secret は proxy→SM 直書きで context に載らない。
+  rotateServiceTokenTool as unknown as ToolEntry<z.ZodTypeAny>,
+  deleteServiceTokenTool as unknown as ToolEntry<z.ZodTypeAny>,
 ];
