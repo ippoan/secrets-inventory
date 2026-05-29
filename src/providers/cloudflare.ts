@@ -311,6 +311,143 @@ function proxyHeaders(ctx: CfProxyContext): Record<string, string> {
   return h;
 }
 
+// ===========================================================================
+// Phase 2: Service Token rotate / delete (Refs #64 / proxy #40)
+//
+// proxy 側 `POST /cf/service-tokens/{id}/rotate` と `DELETE
+// /cf/service-tokens/{id}` を呼ぶ。rotate の新 client_secret は **proxy →
+// GCP Secret Manager 直書き**なので worker は値を一切扱わない (= LLM context
+// に載らない)。戻り値は metadata のみ。
+// ===========================================================================
+
+export interface CfRotateServiceTokenArgs {
+  /** CF service token id (= list の id / 突合キー)。 */
+  tokenId: string;
+  /** 新 client_secret の着地先 GCP SM short name。 */
+  smSecretName: string;
+  /** SM 側既存衝突時に 409(true) か 既存再利用=新 version(false)。default false。 */
+  failIfExists?: boolean;
+}
+
+export interface CfServiceTokenWriteResult {
+  status: "ok" | "fail";
+  token_id?: string;
+  client_id?: string;
+  expires_at?: string;
+  client_secret_version?: number;
+  sm_secret_name?: string;
+  sm_version?: string;
+  created?: boolean;
+  error?: string;
+}
+
+/**
+ * service token を rotate (= 新 client_secret 発行 → proxy が SM へ直書き)。
+ * 失敗は status="fail" で返し throw しない。値は worker を経由しない。
+ */
+export async function rotateCloudflareServiceToken(
+  args: CfRotateServiceTokenArgs,
+  ctx: CfProxyContext,
+): Promise<CfServiceTokenWriteResult> {
+  let res: Response;
+  try {
+    res = await fetch(
+      `${ctx.proxyUrl}/cf/service-tokens/${encodeURIComponent(args.tokenId)}/rotate`,
+      {
+        method: "POST",
+        headers: proxyHeaders(ctx),
+        body: JSON.stringify({
+          sm_secret_name: args.smSecretName,
+          fail_if_exists: args.failIfExists ?? false,
+        }),
+      },
+    );
+  } catch (err) {
+    return {
+      status: "fail",
+      error: `cf proxy network: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+  if (!res.ok) {
+    const body = (await res.text()).slice(0, 200);
+    return { status: "fail", error: `cf proxy ${res.status}: ${body}` };
+  }
+  let parsed: {
+    ok?: boolean;
+    token_id?: string;
+    client_id?: string;
+    expires_at?: string;
+    client_secret_version?: number;
+    sm_secret_name?: string;
+    sm_version?: string;
+    created?: boolean;
+  };
+  try {
+    parsed = (await res.json()) as typeof parsed;
+  } catch (err) {
+    return {
+      status: "fail",
+      error: `cf proxy bad json: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+  if (!parsed.ok || typeof parsed.token_id !== "string") {
+    return { status: "fail", error: "cf proxy returned ok=false or missing token_id" };
+  }
+  return {
+    status: "ok",
+    token_id: parsed.token_id,
+    client_id: parsed.client_id,
+    expires_at: parsed.expires_at,
+    client_secret_version: parsed.client_secret_version,
+    sm_secret_name: parsed.sm_secret_name,
+    sm_version: parsed.sm_version,
+    created: parsed.created,
+  };
+}
+
+export interface CfDeleteServiceTokenArgs {
+  tokenId: string;
+}
+
+/**
+ * service token を delete (= 野良 token revoke)。値・SM 連携なし。
+ * 失敗は status="fail" で返し throw しない。
+ */
+export async function deleteCloudflareServiceToken(
+  args: CfDeleteServiceTokenArgs,
+  ctx: CfProxyContext,
+): Promise<CfServiceTokenWriteResult> {
+  let res: Response;
+  try {
+    res = await fetch(
+      `${ctx.proxyUrl}/cf/service-tokens/${encodeURIComponent(args.tokenId)}`,
+      { method: "DELETE", headers: proxyHeaders(ctx) },
+    );
+  } catch (err) {
+    return {
+      status: "fail",
+      error: `cf proxy network: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+  if (!res.ok) {
+    const body = (await res.text()).slice(0, 200);
+    return { status: "fail", error: `cf proxy ${res.status}: ${body}` };
+  }
+  let parsed: { ok?: boolean; token_id?: string };
+  try {
+    parsed = (await res.json()) as typeof parsed;
+  } catch (err) {
+    return {
+      status: "fail",
+      error: `cf proxy bad json: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+  if (!parsed.ok || typeof parsed.token_id !== "string") {
+    return { status: "fail", error: "cf proxy returned ok=false or missing token_id" };
+  }
+  return { status: "ok", token_id: parsed.token_id };
+}
+
 /**
  * Env から proxy ctx を組み立てる helper。inventory.ts / tool 実装から共通利用。
  * API key の取得 (= Secrets Store binding `.get()`) も一緒にやる。

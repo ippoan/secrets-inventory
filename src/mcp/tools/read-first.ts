@@ -144,6 +144,26 @@ const WORKFLOWS = {
     "返ってきた `rows` に in_github=false や in_cloudflare=false が並んでいたら、" +
       "rotate_secret か create_secret で同名を投入して揃える。",
   ].join("\n"),
+  manage_service_tokens: [
+    "CF Access Service Token の棚卸し → rotate / delete (Refs #62 / #64):",
+    "",
+    "  # 1. 野良 (orphan) / 記録漏れ (missing_in_cf) を抽出",
+    "  tools/call get_drift {targets: ['service_tokens']}",
+    "  # → service_token_rows に status=orphan / missing_in_cf が並ぶ",
+    "",
+    "  # 2. rotate (新 client_secret を発行 → proxy が GCP SM へ直書き、値は context に載らない)",
+    "  tools/call rotate_service_token {",
+    "    token_id: '<id>', confirm_token_id: '<id>',",
+    "    sm_secret_name: 'foo-client-secret',   # 着地先 SM。cf_token_id ラベル台帳と連動",
+    "  }",
+    "",
+    "  # 3. delete (野良 revoke。依存サービスは到達不能になるので確認必須)",
+    "  tools/call delete_service_token { token_id: '<id>', confirm_token_id: '<id>' }",
+    "",
+    "注意: hyperdrive-* 等は Cloudflare 自動管理の現役 token。delete 前に必ず用途を確認。" +
+      "CF_SERVICE_TOKEN_PROTECTED_IDS に列挙した id は rotate/delete とも拒否される。" +
+      "両 tool とも binding_jwt の mcp.write scope 必須。",
+  ].join("\n"),
 };
 
 interface ReadFirstResult {

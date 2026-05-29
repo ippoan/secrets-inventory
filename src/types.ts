@@ -39,6 +39,11 @@ export interface Env {
   CF_STORE_ID: string;
   GITHUB_ORG: string;
 
+  // Phase 2 (Refs #64): rotate/delete を **拒否**する CF service token id の
+  // カンマ区切りリスト (= 管理系 / 現役で消すと困る token の保護 = 自殺トークン
+  // 対策)。未設定なら保護なし。
+  CF_SERVICE_TOKEN_PROTECTED_IDS?: string;
+
   // GCP Secret Manager (正) — Cloud Run proxy 経由でアクセス。
   // proxy code は ippoan/secrets-inventory-gcp、SA key は発行しない (ADC)。
   GCP_PROJECT_ID: string;
