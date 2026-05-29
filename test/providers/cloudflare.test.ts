@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import {
   listCloudflareSecrets,
+  listCloudflareServiceTokens,
   rotateCloudflare,
   createCloudflare,
   CloudflareProxyError,
@@ -174,5 +175,75 @@ describe("createCloudflare (via proxy)", () => {
     expect(res.status).toBe("ok");
     expect(res.created).toBe(false);
     expect(res.secret_id).toBe("existing-id");
+  });
+});
+
+describe("listCloudflareServiceTokens (via proxy)", () => {
+  it("maps proxy service_tokens to SecretMetadata with kind=service_token", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = typeof input === "string" ? input : input.toString();
+      expect(url).toBe("https://gcp-stub.run.app/cf/service-tokens");
+      return Response.json({
+        service_tokens: [
+          {
+            id: "st-1",
+            name: "testone",
+            client_id: "abc.access",
+            duration: "8760h",
+            created: "2026-01-01T00:00:00Z",
+            modified: "2026-05-01T00:00:00Z",
+          },
+          { id: "st-2", name: "api" },
+        ],
+      });
+    });
+
+    const items = await listCloudflareServiceTokens(ctx);
+    expect(items).toHaveLength(2);
+    expect(items[0]?.name).toBe("testone");
+    expect(items[0]?.id).toBe("st-1");
+    expect(items[0]?.created_at).toBe("2026-01-01T00:00:00Z");
+    expect(items[0]?.updated_at).toBe("2026-05-01T00:00:00Z");
+    const extra0 = items[0]?.extra as {
+      kind: string;
+      client_id: string | null;
+      duration: string | null;
+    };
+    expect(extra0.kind).toBe("service_token");
+    expect(extra0.client_id).toBe("abc.access");
+    expect(extra0.duration).toBe("8760h");
+    // 欠落 field は null fallback
+    const extra1 = items[1]?.extra as { client_id: string | null };
+    expect(items[1]?.updated_at).toBeNull();
+    expect(extra1.client_id).toBeNull();
+    // client_secret は構造的に返らない
+    for (const it of items) {
+      expect(JSON.stringify(it)).not.toContain("client_secret");
+    }
+  });
+
+  it("returns [] when service_tokens key is absent", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json({}));
+    await expect(listCloudflareServiceTokens(ctx)).resolves.toEqual([]);
+  });
+
+  it("sends X-Inventory-API-Key header", async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(Response.json({ service_tokens: [] }));
+    await listCloudflareServiceTokens(ctx);
+    const init = fetchSpy.mock.calls[0]?.[1] as RequestInit | undefined;
+    expect(
+      (init?.headers as Record<string, string>)?.["X-Inventory-API-Key"],
+    ).toBe("shared-secret");
+  });
+
+  it("throws CloudflareProxyError on non-2xx", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response("upstream error", { status: 502 }),
+    );
+    await expect(listCloudflareServiceTokens(ctx)).rejects.toThrow(
+      CloudflareProxyError,
+    );
   });
 });

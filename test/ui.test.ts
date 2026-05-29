@@ -15,7 +15,8 @@ function baseResult(overrides: Partial<InventoryResult> = {}): InventoryResult {
     snapshot_at: null,
     snapshot_committed: false,
     errors: {},
-    provider_counts: { gcp: 0, github: 0, cloudflare: 0 },
+    provider_counts: { gcp: 0, github: 0, cloudflare: 0, service_tokens: 0 },
+    service_tokens: { rows: [] },
     ...overrides,
   };
 }
@@ -107,7 +108,7 @@ describe("renderInventoryPage", () => {
           },
         ],
         errors: { github: "401 Unauthorized" },
-        provider_counts: { gcp: 1, github: null, cloudflare: 0 },
+        provider_counts: { gcp: 1, github: null, cloudflare: 0, service_tokens: 0 },
       }),
     );
     expect(html).toMatch(/aria-label="unknown"/);
@@ -120,7 +121,7 @@ describe("renderInventoryPage", () => {
   it("renders 'Fetched' counts per provider in the summary", () => {
     const html = renderInventoryPage(
       baseResult({
-        provider_counts: { gcp: 34, github: 12, cloudflare: 5 },
+        provider_counts: { gcp: 34, github: 12, cloudflare: 5, service_tokens: 0 },
         rows: [],
       }),
     );
@@ -132,7 +133,7 @@ describe("renderInventoryPage", () => {
   it("renders 'github: 0' (not failed) when GitHub fetched successfully but empty", () => {
     const html = renderInventoryPage(
       baseResult({
-        provider_counts: { gcp: 1, github: 0, cloudflare: 1 },
+        provider_counts: { gcp: 1, github: 0, cloudflare: 1, service_tokens: 0 },
       }),
     );
     // 0 件取得 (= empty list) と fetch 失敗 (= null) を区別する
@@ -271,7 +272,7 @@ describe("renderInventoryPage", () => {
             is_new_since_snapshot: false,
           },
         ],
-        provider_counts: { gcp: 2, github: 10, cloudflare: 5 },
+        provider_counts: { gcp: 2, github: 10, cloudflare: 5, service_tokens: 0 },
       }),
     );
     // GCP 列ヘッダー: 件数だけ (source of truth)
@@ -295,7 +296,7 @@ describe("renderInventoryPage", () => {
             is_new_since_snapshot: false,
           },
         ],
-        provider_counts: { gcp: 1, github: null, cloudflare: 1 },
+        provider_counts: { gcp: 1, github: null, cloudflare: 1, service_tokens: 0 },
         errors: { github: "fail" },
       }),
     );
@@ -440,5 +441,100 @@ describe("renderErrorPage", () => {
     const html = renderErrorPage("<script>alert(1)</script>");
     expect(html).not.toContain("<script>alert(1)</script>");
     expect(html).toContain("&lt;script&gt;alert(1)&lt;/script&gt;");
+  });
+});
+
+describe("renderInventoryPage — CF service token section (Refs #62)", () => {
+  it("renders orphan / missing / ok rows with status badges", () => {
+    const html = renderInventoryPage(
+      baseResult({
+        provider_counts: { gcp: 1, github: 0, cloudflare: 0, service_tokens: 2 },
+        service_tokens: {
+          rows: [
+            {
+              status: "orphan",
+              cf_token_id: "st-wild",
+              cf: {
+                name: "wild",
+                id: "st-wild",
+                created_at: "2026-03-01T00:00:00Z",
+                extra: { kind: "service_token", client_id: "wild.access" },
+              },
+              gcp: null,
+            },
+            {
+              status: "missing_in_cf",
+              cf_token_id: "st-gone",
+              cf: null,
+              gcp: { name: "ghost-secret", extra: { labels: {} } },
+            },
+            {
+              status: "ok",
+              cf_token_id: "st-ok",
+              cf: { name: "matched", id: "st-ok", extra: {} },
+              gcp: { name: "matched-secret", extra: {} },
+            },
+          ],
+        },
+      }),
+    );
+    expect(html).toContain("CF Access Service Tokens");
+    expect(html).toContain(">orphan<");
+    expect(html).toContain(">missing<");
+    expect(html).toContain(">ok<");
+    // 内容
+    expect(html).toContain("wild");
+    expect(html).toContain("wild.access");
+    expect(html).toContain("ghost-secret");
+    expect(html).toContain("matched-secret");
+    // 件数 badge (orphan / missing をハイライト)
+    expect(html).toContain("1 orphan");
+    expect(html).toContain("1 missing");
+    // drift 行は drift class
+    expect(html).toContain('<tr class="drift">');
+  });
+
+  it("renders friendly empty state when there are no service tokens", () => {
+    const html = renderInventoryPage(baseResult());
+    expect(html).toContain("CF Access Service Tokens");
+    expect(html).toContain("Service Token はありません");
+  });
+
+  it("shows (?) and a friendly note + banner when service token fetch failed", () => {
+    const html = renderInventoryPage(
+      baseResult({
+        errors: { service_tokens: "CF proxy 403: forbidden" },
+        provider_counts: {
+          gcp: 0,
+          github: 0,
+          cloudflare: 0,
+          service_tokens: null,
+        },
+      }),
+    );
+    expect(html).toContain("CF Service Token fetch failed");
+    expect(html).toContain("CF proxy 403");
+    expect(html).toContain("取得できませんでした");
+    expect(html).toContain(`<span class="muted">(?)</span>`);
+  });
+
+  it("escapes service token fields (defensive)", () => {
+    const html = renderInventoryPage(
+      baseResult({
+        provider_counts: { gcp: 0, github: 0, cloudflare: 0, service_tokens: 1 },
+        service_tokens: {
+          rows: [
+            {
+              status: "orphan",
+              cf_token_id: "<id>",
+              cf: { name: "<evil>", id: "<id>", extra: {} },
+              gcp: null,
+            },
+          ],
+        },
+      }),
+    );
+    expect(html).toContain("&lt;evil&gt;");
+    expect(html).not.toContain("<evil>");
   });
 });

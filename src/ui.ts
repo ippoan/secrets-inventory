@@ -1,5 +1,6 @@
 import type { InventoryResult } from "./inventory";
 import type { InventoryRow } from "./diff";
+import type { ServiceTokenRow, ServiceTokenStatus } from "./service-tokens";
 import type { SecretMetadata } from "./types";
 import { gcpConsoleListUrl, gcpConsoleSecretUrl } from "./gcp-console";
 
@@ -100,6 +101,8 @@ export function renderInventoryPage(
       ${rowsHtml || `<tr><td colspan="5" class="muted">GCP に secret がありません</td></tr>`}
     </tbody>
   </table>
+
+  ${renderServiceTokenSection(result)}
 
   <footer>
     <p>
@@ -230,7 +233,11 @@ function renderDiffSummary(diff: { added: string[]; removed: string[] }): string
   `;
 }
 
-function renderErrorBanners(errors: { github?: string; cloudflare?: string }): string {
+function renderErrorBanners(errors: {
+  github?: string;
+  cloudflare?: string;
+  service_tokens?: string;
+}): string {
   const parts: string[] = [];
   if (errors.github) {
     parts.push(
@@ -240,6 +247,11 @@ function renderErrorBanners(errors: { github?: string; cloudflare?: string }): s
   if (errors.cloudflare) {
     parts.push(
       `<div class="err">Cloudflare fetch failed: ${escapeHtml(errors.cloudflare)} — 該当列は <span class="unknown">?</span> として表示します</div>`,
+    );
+  }
+  if (errors.service_tokens) {
+    parts.push(
+      `<div class="err">CF Service Token fetch failed: ${escapeHtml(errors.service_tokens)} — Service Token 突合は実施できませんでした</div>`,
     );
   }
   return parts.join("\n");
@@ -331,6 +343,116 @@ function latestTimestamp(meta: SecretMetadata): string | null {
 }
 
 /**
+ * CF Access Service Token の突合セクション (Refs #62)。
+ *
+ * 既存の GCP-centric な突合表とは別に、CF service token を GCP SM の
+ * `cf_token_id` ラベル台帳と突き合わせた結果を出す。orphan (野良) /
+ * missing_in_cf (記録漏れ) を上に寄せてハイライトする。
+ */
+function renderServiceTokenSection(result: InventoryResult): string {
+  const rows = result.service_tokens.rows;
+  const fetched = result.provider_counts.service_tokens;
+  const counts = summarizeServiceTokenStatuses(rows);
+
+  const bodyHtml = rows.length
+    ? rows.map(renderServiceTokenRow).join("")
+    : `<tr><td colspan="6" class="muted">${
+        fetched === null
+          ? "CF service token を取得できませんでした (上のエラーを参照)"
+          : "Service Token はありません"
+      }</td></tr>`;
+
+  return `
+  <section class="svc-tokens">
+    <h2>🎫 CF Access Service Tokens ${renderServiceTokenCountBadge(fetched, counts)}</h2>
+    <p class="sub">
+      CF の service token を GCP Secret Manager の <code>cf_token_id</code> ラベル台帳と突合します。
+      <span class="badge badge-removed">orphan</span> = 野良 (CF に在るが台帳に無い)、
+      <span class="badge badge-warn">missing</span> = 記録漏れ (台帳に在るが CF に無い)。
+      値 (client_secret) は list API がそもそも返しません。
+    </p>
+    <table aria-label="CF Access service token の突合表">
+      <thead>
+        <tr>
+          <th scope="col">Status</th>
+          <th scope="col">Name</th>
+          <th scope="col">client_id</th>
+          <th scope="col">cf_token_id</th>
+          <th scope="col">GCP 台帳</th>
+          <th scope="col">created</th>
+        </tr>
+      </thead>
+      <tbody>${bodyHtml}</tbody>
+    </table>
+  </section>`;
+}
+
+function renderServiceTokenRow(row: ServiceTokenRow): string {
+  const name = row.cf?.name ?? row.gcp?.name ?? "—";
+  const clientId = serviceTokenClientId(row.cf);
+  const gcpName = row.gcp?.name ?? null;
+  const created = row.cf?.created_at ?? row.gcp?.created_at ?? null;
+  const trClass = row.status === "ok" ? "" : ' class="drift"';
+  return `<tr${trClass}>
+    <td>${renderServiceTokenStatus(row.status)}</td>
+    <td class="name-cell">${escapeHtml(name)}</td>
+    <td class="name-cell">${clientId ? escapeHtml(clientId) : '<span class="muted">—</span>'}</td>
+    <td class="name-cell">${row.cf_token_id ? escapeHtml(row.cf_token_id) : '<span class="muted">—</span>'}</td>
+    <td class="name-cell">${gcpName ? escapeHtml(gcpName) : '<span class="muted">—</span>'}</td>
+    <td class="ts">${created ? escapeHtml(created) : '<span class="muted">—</span>'}</td>
+  </tr>`;
+}
+
+function renderServiceTokenStatus(status: ServiceTokenStatus): string {
+  switch (status) {
+    case "ok":
+      return `<span class="badge badge-ok" title="CF token と GCP SM 台帳が突合できた">ok</span>`;
+    case "orphan":
+      return `<span class="badge badge-removed" title="CF に在るが GCP SM 台帳 (cf_token_id ラベル) に無い = 野良 service token">orphan</span>`;
+    case "missing_in_cf":
+      return `<span class="badge badge-warn" title="GCP SM 台帳に在るが CF に対応 token が無い = 記録漏れ / 失効後の掃除漏れ">missing</span>`;
+  }
+}
+
+function serviceTokenClientId(cf: SecretMetadata | null): string | null {
+  const v = cf?.extra?.client_id;
+  return typeof v === "string" && v.length > 0 ? v : null;
+}
+
+function summarizeServiceTokenStatuses(rows: ServiceTokenRow[]): {
+  ok: number;
+  orphan: number;
+  missing: number;
+} {
+  let ok = 0;
+  let orphan = 0;
+  let missing = 0;
+  for (const r of rows) {
+    if (r.status === "ok") ok++;
+    else if (r.status === "orphan") orphan++;
+    else missing++;
+  }
+  return { ok, orphan, missing };
+}
+
+function renderServiceTokenCountBadge(
+  fetched: number | null,
+  counts: { ok: number; orphan: number; missing: number },
+): string {
+  if (fetched === null) {
+    return `<span class="muted">(?)</span>`;
+  }
+  const parts = [`<span class="muted">(${fetched})</span>`];
+  if (counts.orphan > 0) {
+    parts.push(`<span class="badge badge-removed">${counts.orphan} orphan</span>`);
+  }
+  if (counts.missing > 0) {
+    parts.push(`<span class="badge badge-warn">${counts.missing} missing</span>`);
+  }
+  return parts.join(" ");
+}
+
+/**
  * テキスト挿入用 escape。HTML 属性値には escapeAttr を使う。
  */
 export function escapeHtml(s: string): string {
@@ -383,6 +505,7 @@ const PAGE_STYLES = `
   .badge-added   { background: #1f3a26; color: #56d364; }
   .badge-removed { background: #3a1f1f; color: #ff7b72; }
   .badge-ok      { background: #1f2937; color: #8b949e; }
+  .badge-warn    { background: #3a2f1a; color: #f0883e; }
   /* Per-secret label count chip in the name cell. Tooltip shows the
      full key=value list (newline-separated). cursor:help is the
      standard browser hint that there is a tooltip on hover. */
@@ -440,6 +563,18 @@ const PAGE_STYLES = `
   th { background: #161b22; font-weight: 600; color: #8b949e; }
   tr:last-child td { border-bottom: none; }
   tr.new td { background: rgba(86, 211, 100, 0.08); }
+  tr.drift td { background: rgba(255, 123, 114, 0.08); }
+  .svc-tokens { margin-top: 28px; }
+  .svc-tokens h2 { font-size: 18px; margin: 0 0 4px; }
+  .svc-tokens .sub { margin: 0 0 12px; color: #8b949e; }
+  .svc-tokens code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 4px;
+    padding: 1px 5px;
+    font-size: 12px;
+  }
   .name-cell, .ts {
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   }

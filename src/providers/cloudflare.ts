@@ -81,6 +81,67 @@ export async function listCloudflareSecrets(
 }
 
 // ===========================================================================
+// CF Access Service Token list (Refs #62 / ippoan/secrets-inventory-gcp#38)
+//
+// Service Token は Secrets Store secret (`/cf/secrets`) とは **別 API**
+// (`access/service_tokens`)。proxy 側 `GET /cf/service-tokens` を叩く。
+// list は `client_secret` を返さない API なので構造的に値漏洩無し。
+// ===========================================================================
+
+interface CfRawServiceToken {
+  id: string;
+  name: string;
+  /** client_id は突合キー候補 (= SM ラベル cf_token_id との照合)。 */
+  client_id?: string | null;
+  /** token の有効期間 (e.g. "8760h")。期限把握用。 */
+  duration?: string | null;
+  /** proxy 側で CF の created_at / updated_at を created / modified に正規化済。 */
+  created?: string | null;
+  modified?: string | null;
+}
+
+interface CfServiceTokenListResponse {
+  service_tokens?: CfRawServiceToken[];
+}
+
+/**
+ * proxy 経由で CF Access の Service Token list を取得。
+ *
+ * 既存 secret (`listCloudflareSecrets`) と区別するため `extra.kind` に
+ * `"service_token"` を載せる。突合 (`reconcileServiceTokens`) は `id` を
+ * GCP SM ラベル `cf_token_id` と照合する。値 (= client_secret) は API が
+ * そもそも返さないので構造的に値漏洩無し。
+ */
+export async function listCloudflareServiceTokens(
+  ctx: CfProxyContext,
+): Promise<SecretMetadata[]> {
+  const res = await fetch(`${ctx.proxyUrl}/cf/service-tokens`, {
+    method: "GET",
+    headers: {
+      "X-Inventory-API-Key": ctx.apiKey,
+      Accept: "application/json",
+      "User-Agent": "secrets-inventory",
+    },
+  });
+  if (!res.ok) {
+    const body = (await res.text()).slice(0, 200);
+    throw new CloudflareProxyError(res.status, `CF proxy ${res.status}: ${body}`);
+  }
+  const raw = (await res.json()) as CfServiceTokenListResponse;
+  return (raw.service_tokens ?? []).map((t) => ({
+    name: t.name,
+    id: t.id,
+    created_at: t.created ?? null,
+    updated_at: t.modified ?? null,
+    extra: {
+      kind: "service_token",
+      client_id: t.client_id ?? null,
+      duration: t.duration ?? null,
+    },
+  }));
+}
+
+// ===========================================================================
 // write 系 (= 旧 packages/rotate-mcp の rotateCloudflare / createCloudflare を
 // proxy 経由に書き換えたもの)
 // ===========================================================================
