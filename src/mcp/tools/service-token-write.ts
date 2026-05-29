@@ -117,6 +117,15 @@ export const deleteServiceTokenInputSchema = z
       .string()
       .regex(TOKEN_ID_PATTERN, "token_id must match ^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$")
       .describe("delete (revoke) 対象の CF service token id"),
+    sm_secret_name: z
+      .string()
+      .regex(NAME_PATTERN, "sm_secret_name must match ^[A-Za-z][A-Za-z0-9_-]{0,127}$")
+      .optional()
+      .describe(
+        "任意。渡すと revoke 成功後に、この client_secret 保管 GCP SM secret へ " +
+          "`cf_service_token=deleted` audit label を proxy が打つ (値・version には触れない)。" +
+          "省略時は従来どおり CF token の revoke のみ。",
+      ),
     confirm_token_id: z
       .string()
       .describe("type-to-confirm: token_id と一致する文字列。不一致なら invalid_params。"),
@@ -135,7 +144,9 @@ export const deleteServiceTokenTool = {
     "CF Access Service Token を delete (revoke) する (= 野良 token 掃除)。" +
     "**この token に依存するサービスは到達不能になる**ので type-to-confirm " +
     "(confirm_token_id) 必須。CF_SERVICE_TOKEN_PROTECTED_IDS の token は拒否。" +
-    "hyperdrive-* など現役 token を誤爆しないよう get_drift で確認してから実行すること。Refs #64。",
+    "hyperdrive-* など現役 token を誤爆しないよう get_drift で確認してから実行すること。" +
+    "任意の sm_secret_name を渡すと revoke 後に該当 GCP SM secret へ " +
+    "`cf_service_token=deleted` audit label を打つ (proxy 側 patch、値には触れない)。Refs #64 #68。",
   inputSchema: deleteServiceTokenInputSchema,
   requiresScope: "mcp.write" as const,
   execute: async (
@@ -147,7 +158,10 @@ export const deleteServiceTokenTool = {
       return protectedFail(args.token_id);
     }
     const ctx = await cfProxyCtxFromEnv(env, actorEmail);
-    return await deleteCloudflareServiceToken({ tokenId: args.token_id }, ctx);
+    return await deleteCloudflareServiceToken(
+      { tokenId: args.token_id, smSecretName: args.sm_secret_name },
+      ctx,
+    );
   },
 } as const;
 

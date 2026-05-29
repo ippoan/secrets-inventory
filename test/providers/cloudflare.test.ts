@@ -311,6 +311,30 @@ describe("deleteCloudflareServiceToken (via proxy)", () => {
     expect(fetchSpy).toHaveBeenCalledOnce();
   });
 
+  it("appends sm_secret_name query and surfaces label_applied", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = typeof input === "string" ? input : input.toString();
+      expect(url).toBe(
+        "https://gcp-stub.run.app/cf/service-tokens/st-9?sm_secret_name=foo-client-secret",
+      );
+      expect(init?.method).toBe("DELETE");
+      return Response.json({
+        ok: true,
+        token_id: "st-9",
+        sm_secret_name: "foo-client-secret",
+        label_applied: true,
+      });
+    });
+    const res = await deleteCloudflareServiceToken(
+      { tokenId: "st-9", smSecretName: "foo-client-secret" },
+      ctx,
+    );
+    expect(res.status).toBe("ok");
+    expect(res.sm_secret_name).toBe("foo-client-secret");
+    expect(res.label_applied).toBe(true);
+    expect(fetchSpy).toHaveBeenCalledOnce();
+  });
+
   it("fail on non-2xx proxy", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("boom", { status: 502 }));
     const res = await deleteCloudflareServiceToken({ tokenId: "st-9" }, ctx);
