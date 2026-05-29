@@ -16,6 +16,15 @@ export const getDriftInputSchema = z
       .describe(
         "drift をチェックする provider 群。省略時は github / cloudflare 両方。",
       ),
+    reason: z
+      .string()
+      .max(200)
+      .optional()
+      .describe(
+        "任意の監査用メモ。指定すると応答 (`reason`) にそのままエコーされる " +
+          "(なぜ drift チェックを走らせたかの文脈を audit に残す用途)。値の" +
+          "検査・副作用は無い。",
+      ),
   })
   .strict();
 
@@ -33,6 +42,8 @@ export interface GetDriftResult {
   service_token_rows: ServiceTokenRow[];
   errors: InventoryResult["errors"];
   provider_counts: InventoryResult["provider_counts"];
+  /** 入力 `reason` をそのままエコー (指定時のみ)。audit 文脈の保持用。 */
+  reason?: string;
 }
 
 export const getDriftTool = {
@@ -60,6 +71,7 @@ export const getDriftTool = {
       service_token_rows,
       errors: inv.errors,
       provider_counts: inv.provider_counts,
+      ...(args.reason ? { reason: args.reason } : {}),
     };
   },
 } as const;
