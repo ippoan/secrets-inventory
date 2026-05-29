@@ -4,6 +4,8 @@ import {
   deleteServiceTokenTool,
   rotateServiceTokenInputSchema,
   deleteServiceTokenInputSchema,
+  createServiceTokenTool,
+  createServiceTokenInputSchema,
   parseProtectedTokenIds,
 } from "../../../src/mcp/tools/service-token-write";
 import { baseTestEnv } from "../../test-helpers";
@@ -163,5 +165,65 @@ describe("delete_service_token execute", () => {
 
   it("requires mcp.write scope", () => {
     expect(deleteServiceTokenTool.requiresScope).toBe("mcp.write");
+  });
+});
+
+describe("create_service_token", () => {
+  it("schema: accepts convention-style name + sm name + duration", () => {
+    const r = createServiceTokenInputSchema.safeParse({
+      name: "ohishi-dtako-prod-api-202605",
+      sm_secret_name: "dtako-api-client-secret",
+      duration: "8760h",
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it("schema: rejects name with spaces (convention enforce)", () => {
+    expect(
+      createServiceTokenInputSchema.safeParse({
+        name: "bad name",
+        sm_secret_name: "foo",
+      }).success,
+    ).toBe(false);
+  });
+
+  it("schema: rejects bad duration", () => {
+    expect(
+      createServiceTokenInputSchema.safeParse({
+        name: "foo",
+        sm_secret_name: "bar",
+        duration: "forever",
+      }).success,
+    ).toBe(false);
+  });
+
+  it("execute: calls proxy create and returns metadata (no client_secret)", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = typeof input === "string" ? input : input.toString();
+      expect(url).toBe("https://gcp-stub.run.app/cf/service-tokens");
+      expect(init?.method).toBe("POST");
+      return Response.json({
+        ok: true,
+        token_id: "st-new",
+        name: "ohishi-dtako-prod-api-202605",
+        client_id: "new.access",
+        sm_secret_name: "dtako-api-client-secret",
+        sm_version: "projects/p/secrets/dtako-api-client-secret/versions/1",
+        created: true,
+      });
+    });
+    const res = (await createServiceTokenTool.execute(baseTestEnv() as Env, {
+      name: "ohishi-dtako-prod-api-202605",
+      sm_secret_name: "dtako-api-client-secret",
+    })) as { status: string; token_id?: string; name?: string };
+    expect(res.status).toBe("ok");
+    expect(res.token_id).toBe("st-new");
+    expect(res.name).toBe("ohishi-dtako-prod-api-202605");
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    expect(JSON.stringify(res)).not.toContain("client_secret\"");
+  });
+
+  it("requires mcp.write scope", () => {
+    expect(createServiceTokenTool.requiresScope).toBe("mcp.write");
   });
 });

@@ -22,6 +22,7 @@ import { convertPkcs8Tool } from "./tools/convert-pkcs8";
 import {
   rotateServiceTokenTool,
   deleteServiceTokenTool,
+  createServiceTokenTool,
 } from "./tools/service-token-write";
 
 export interface ToolEntry<S extends z.ZodTypeAny> {
@@ -64,4 +65,7 @@ export const STATIC_TOOLS: ToolEntry<z.ZodTypeAny>[] = [
   // rotate の新 client_secret は proxy→SM 直書きで context に載らない。
   rotateServiceTokenTool as unknown as ToolEntry<z.ZodTypeAny>,
   deleteServiceTokenTool as unknown as ToolEntry<z.ZodTypeAny>,
+  // Phase 3 (Refs #66): service token の新規発行。client_secret は proxy→SM
+  // 直書きで context に載らない。
+  createServiceTokenTool as unknown as ToolEntry<z.ZodTypeAny>,
 ];

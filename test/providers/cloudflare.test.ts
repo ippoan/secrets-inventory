@@ -6,6 +6,7 @@ import {
   createCloudflare,
   rotateCloudflareServiceToken,
   deleteCloudflareServiceToken,
+  createCloudflareServiceToken,
   CloudflareProxyError,
   type CfProxyContext,
 } from "../../src/providers/cloudflare";
@@ -313,6 +314,62 @@ describe("deleteCloudflareServiceToken (via proxy)", () => {
   it("fail on non-2xx proxy", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("boom", { status: 502 }));
     const res = await deleteCloudflareServiceToken({ tokenId: "st-9" }, ctx);
+    expect(res.status).toBe("fail");
+    expect(res.error).toMatch(/502/);
+  });
+});
+
+describe("createCloudflareServiceToken (via proxy)", () => {
+  it("POSTs /cf/service-tokens with name + sm_secret_name and returns metadata (no secret)", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = typeof input === "string" ? input : input.toString();
+      expect(url).toBe("https://gcp-stub.run.app/cf/service-tokens");
+      expect(init?.method).toBe("POST");
+      return Response.json({
+        ok: true,
+        token_id: "st-new",
+        name: "ohishi-dtako-prod-api-202605",
+        client_id: "new.access",
+        expires_at: "2027-05-29T00:00:00Z",
+        sm_secret_name: "dtako-api-client-secret",
+        sm_version: "projects/p/secrets/dtako-api-client-secret/versions/1",
+        created: true,
+      });
+    });
+    const res = await createCloudflareServiceToken(
+      {
+        name: "ohishi-dtako-prod-api-202605",
+        smSecretName: "dtako-api-client-secret",
+        duration: "8760h",
+      },
+      ctx,
+    );
+    expect(res.status).toBe("ok");
+    expect(res.token_id).toBe("st-new");
+    expect(res.name).toBe("ohishi-dtako-prod-api-202605");
+    expect(res.created).toBe(true);
+    const body = JSON.parse((fetchSpy.mock.calls[0]?.[1] as RequestInit).body as string);
+    expect(body).toMatchObject({
+      name: "ohishi-dtako-prod-api-202605",
+      sm_secret_name: "dtako-api-client-secret",
+      duration: "8760h",
+      fail_if_exists: false,
+    });
+    expect(JSON.stringify(res)).not.toContain("client_secret\"");
+  });
+
+  it("omits duration from body when not provided", async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(Response.json({ ok: true, token_id: "st-x" }));
+    await createCloudflareServiceToken({ name: "foo", smSecretName: "bar" }, ctx);
+    const body = JSON.parse((fetchSpy.mock.calls[0]?.[1] as RequestInit).body as string);
+    expect(body).not.toHaveProperty("duration");
+  });
+
+  it("fail on non-2xx proxy", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("scope", { status: 502 }));
+    const res = await createCloudflareServiceToken({ name: "foo", smSecretName: "bar" }, ctx);
     expect(res.status).toBe("fail");
     expect(res.error).toMatch(/502/);
   });

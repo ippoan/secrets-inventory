@@ -332,6 +332,8 @@ export interface CfRotateServiceTokenArgs {
 export interface CfServiceTokenWriteResult {
   status: "ok" | "fail";
   token_id?: string;
+  /** create のみ: 発行された token の表示名。 */
+  name?: string;
   client_id?: string;
   expires_at?: string;
   client_secret_version?: number;
@@ -446,6 +448,81 @@ export async function deleteCloudflareServiceToken(
     return { status: "fail", error: "cf proxy returned ok=false or missing token_id" };
   }
   return { status: "ok", token_id: parsed.token_id };
+}
+
+export interface CfCreateServiceTokenArgs {
+  /** 発行する CF service token の表示名。 */
+  name: string;
+  /** 発行時のみ返る client_secret の着地先 GCP SM short name。 */
+  smSecretName: string;
+  /** CF token duration (e.g. "8760h")。省略時は CF default。 */
+  duration?: string;
+  /** SM 側既存衝突時に 409(true) か 既存再利用=新 version(false)。default false。 */
+  failIfExists?: boolean;
+}
+
+/**
+ * service token を新規発行 (= create)。発行時のみ返る client_secret は
+ * **proxy → GCP SM 直書き**で worker / LLM context を経由しない。戻り値は
+ * metadata のみ。失敗は status="fail" で返し throw しない。
+ */
+export async function createCloudflareServiceToken(
+  args: CfCreateServiceTokenArgs,
+  ctx: CfProxyContext,
+): Promise<CfServiceTokenWriteResult> {
+  let res: Response;
+  try {
+    res = await fetch(`${ctx.proxyUrl}/cf/service-tokens`, {
+      method: "POST",
+      headers: proxyHeaders(ctx),
+      body: JSON.stringify({
+        name: args.name,
+        sm_secret_name: args.smSecretName,
+        ...(args.duration ? { duration: args.duration } : {}),
+        fail_if_exists: args.failIfExists ?? false,
+      }),
+    });
+  } catch (err) {
+    return {
+      status: "fail",
+      error: `cf proxy network: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+  if (!res.ok) {
+    const body = (await res.text()).slice(0, 200);
+    return { status: "fail", error: `cf proxy ${res.status}: ${body}` };
+  }
+  let parsed: {
+    ok?: boolean;
+    token_id?: string;
+    name?: string;
+    client_id?: string;
+    expires_at?: string;
+    sm_secret_name?: string;
+    sm_version?: string;
+    created?: boolean;
+  };
+  try {
+    parsed = (await res.json()) as typeof parsed;
+  } catch (err) {
+    return {
+      status: "fail",
+      error: `cf proxy bad json: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+  if (!parsed.ok || typeof parsed.token_id !== "string") {
+    return { status: "fail", error: "cf proxy returned ok=false or missing token_id" };
+  }
+  return {
+    status: "ok",
+    token_id: parsed.token_id,
+    name: parsed.name,
+    client_id: parsed.client_id,
+    expires_at: parsed.expires_at,
+    sm_secret_name: parsed.sm_secret_name,
+    sm_version: parsed.sm_version,
+    created: parsed.created,
+  };
 }
 
 /**
