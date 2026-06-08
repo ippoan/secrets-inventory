@@ -414,6 +414,124 @@ describe("renderInventoryPage", () => {
     expect(html).not.toMatch(/class="label-count"[^>]*>1 labels</);
   });
 
+  // --- Consumers 列 (Refs #34) -------------------------------------------
+  // ci-workflows#39 apply_labels の label 形式: `used-by-<owner>-<repo>=active|removed`
+  // (`/` → `-`、lowercased)。active count を出し、tooltip に repo 名一覧を出す。
+
+  it("Consumers 列: label が 0 件なら muted の '—' を出す", () => {
+    const html = renderInventoryPage(
+      baseResult({
+        rows: [
+          {
+            name: "NO_CONSUMER",
+            gcp: { name: "NO_CONSUMER", extra: { labels: {} } },
+            in_github: true,
+            in_cloudflare: true,
+            github: null,
+            cloudflare: null,
+            is_new_since_snapshot: false,
+          },
+        ],
+      }),
+    );
+    // Consumers 列に muted の dash が出る (consumer count badge は無い)
+    expect(html).toContain('<td><span class="muted">—</span></td>');
+    expect(html).not.toMatch(/class="label-count"[^>]*>\d+<\/span><\/td>/);
+  });
+
+  it("Consumers 列: active な used-by label が 1 件なら count=1 + tooltip に repo 名", () => {
+    const html = renderInventoryPage(
+      baseResult({
+        rows: [
+          {
+            name: "ONE_CONSUMER",
+            gcp: {
+              name: "ONE_CONSUMER",
+              extra: {
+                labels: {
+                  env: "production",
+                  "used-by-ippoan-secrets-inventory": "active",
+                },
+              },
+            },
+            in_github: true,
+            in_cloudflare: true,
+            github: null,
+            cloudflare: null,
+            is_new_since_snapshot: false,
+          },
+        ],
+      }),
+    );
+    // count = 1 (env label は consumer ではないので数えない)
+    expect(html).toMatch(
+      /title="ippoan\/secrets-inventory"[^>]*>1<\/span>/,
+    );
+  });
+
+  it("Consumers 列: active な used-by label が複数件なら count + tooltip に全 repo 名 (sort)", () => {
+    const html = renderInventoryPage(
+      baseResult({
+        rows: [
+          {
+            name: "MULTI_CONSUMER",
+            gcp: {
+              name: "MULTI_CONSUMER",
+              extra: {
+                labels: {
+                  "used-by-ippoan-secrets-inventory-gcp": "active",
+                  "used-by-ippoan-secrets-inventory": "active",
+                },
+              },
+            },
+            in_github: true,
+            in_cloudflare: true,
+            github: null,
+            cloudflare: null,
+            is_new_since_snapshot: false,
+          },
+        ],
+      }),
+    );
+    // count = 2
+    expect(html).toMatch(/class="label-count"[^>]*>2<\/span>/);
+    // tooltip は alphabetical sort 順 (secrets-inventory < secrets-inventory-gcp)
+    expect(html).toContain(
+      'title="ippoan/secrets-inventory, ippoan/secrets-inventory-gcp"',
+    );
+  });
+
+  it("Consumers 列: removed の used-by label は count に含めない", () => {
+    const html = renderInventoryPage(
+      baseResult({
+        rows: [
+          {
+            name: "REMOVED_MIX",
+            gcp: {
+              name: "REMOVED_MIX",
+              extra: {
+                labels: {
+                  "used-by-ippoan-secrets-inventory": "active",
+                  "used-by-ippoan-secrets-inventory-gcp": "removed",
+                },
+              },
+            },
+            in_github: true,
+            in_cloudflare: true,
+            github: null,
+            cloudflare: null,
+            is_new_since_snapshot: false,
+          },
+        ],
+      }),
+    );
+    // active は 1 件のみ。removed の gcp consumer は tooltip にも出ない
+    expect(html).toMatch(
+      /title="ippoan\/secrets-inventory"[^>]*>1<\/span>/,
+    );
+    expect(html).not.toContain("ippoan/secrets-inventory-gcp");
+  });
+
   it("links secret names to per-secret GCP console URL", () => {
     const html = renderInventoryPage(
       baseResult({
