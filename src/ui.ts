@@ -94,11 +94,12 @@ export function renderInventoryPage(
         <th scope="col">GCP <span class="muted">(${result.rows.length})</span></th>
         <th scope="col">GitHub ${renderHeaderCount(ghMatch, result.provider_counts.github)}</th>
         <th scope="col">Cloudflare ${renderHeaderCount(cfMatch, result.provider_counts.cloudflare)}</th>
+        <th scope="col">Consumers</th>
         <th scope="col">GCP created</th>
       </tr>
     </thead>
     <tbody>
-      ${rowsHtml || `<tr><td colspan="5" class="muted">GCP に secret がありません</td></tr>`}
+      ${rowsHtml || `<tr><td colspan="6" class="muted">GCP に secret がありません</td></tr>`}
     </tbody>
   </table>
 
@@ -151,6 +152,7 @@ function renderRow(row: InventoryRow, projectId: string): string {
     <td>${markPresentCell(row.gcp)}</td>
     <td>${markCell(row.in_github, row.github, row.gcp)}</td>
     <td>${markCell(row.in_cloudflare, row.cloudflare, row.gcp)}</td>
+    <td>${renderConsumersCell(extractLabels(row.gcp))}</td>
     <td class="ts">${row.gcp.created_at ? escapeHtml(row.gcp.created_at) : '<span class="muted">—</span>'}</td>
   </tr>`;
 }
@@ -184,6 +186,50 @@ function renderLabelBadge(labels: Record<string, string>): string {
   }
   const tooltip = entries.map(([k, v]) => `${k}=${v}`).join("\n");
   return ` <span class="label-count" title="${escapeAttr(tooltip)}">${n} label${n === 1 ? "" : "s"}</span>`;
+}
+
+/**
+ * GCP secret labels から「現在この secret を使っている consumer repo」を抽出する
+ * (Refs #34)。
+ *
+ * ci-workflows#39 の `secret-verify-gcp.yml` (apply_labels) が打つ label 形式は:
+ *   `used-by-<owner>-<repo> = active | removed`
+ * key は `used-by-$(echo "$REPO_SLUG" | tr '/' '-' | tr '[:upper:]' '[:lower:]')`
+ * で生成される (= `ippoan/secrets-inventory-gcp` → `used-by-ippoan-secrets-inventory-gcp`)。
+ *
+ * - value が `active` の label だけを consumer として数える (`removed` は撤退済みなので除外)
+ * - key から `used-by-` prefix を剥がして repo 名を復元する。`/` → `-` の encode は
+ *   repo 名にも `-` が含まれるため **lossy** (完全な逆変換は不可能)。GitHub の owner
+ *   は単一 segment で `-` を含み得るが `/` は含まないため、最初の `-` を `/` に戻して
+ *   `owner/repo` 形に近似復元する (例: `ippoan-secrets-inventory-gcp` →
+ *   `ippoan/secrets-inventory-gcp`)。owner にハイフンが含まれる場合は完全復元できないが、
+ *   ippoan org では問題にならない。
+ */
+function extractActiveConsumers(labels: Record<string, string>): string[] {
+  const repos: string[] = [];
+  for (const [key, value] of Object.entries(labels)) {
+    if (value !== "active") continue;
+    if (!key.startsWith("used-by-")) continue;
+    const slug = key.slice("used-by-".length);
+    if (slug.length === 0) continue;
+    const firstDash = slug.indexOf("-");
+    const repo = firstDash >= 0 ? `${slug.slice(0, firstDash)}/${slug.slice(firstDash + 1)}` : slug;
+    repos.push(repo);
+  }
+  return repos.sort((a, b) => a.localeCompare(b));
+}
+
+/**
+ * Consumers 列のセル。active な consumer repo の **数** を出し、hover (title) で
+ * active repo 名の一覧を見せる。0 件 (= label 無し or active 0) は muted の `—`。
+ */
+function renderConsumersCell(labels: Record<string, string>): string {
+  const repos = extractActiveConsumers(labels);
+  if (repos.length === 0) {
+    return `<span class="muted">—</span>`;
+  }
+  const tooltip = repos.join(", ");
+  return `<span class="label-count" title="${escapeAttr(tooltip)}">${repos.length}</span>`;
 }
 
 /**

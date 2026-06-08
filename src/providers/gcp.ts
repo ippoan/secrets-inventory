@@ -82,6 +82,28 @@ export function shortName(fullName: string): string {
   return idx >= 0 ? fullName.slice(idx + 1) : fullName;
 }
 
+/**
+ * Refs ippoan/secrets-inventory#52: Cloud Run proxy が 5xx を返したとき、
+ * CF edge が body を synthetic な "error code: 502" に置換してしまい原因切り分けが
+ * 困難になる。upstream の status だけでなく `cf-ray` / `server` header を
+ * **log にだけ** 出して切り分け材料を残す。
+ *
+ * 注意: 秘匿情報は response の error field には載せない方針を維持するため、ここで
+ * 出すのは log のみ。body も先頭 200 文字までで、proxy 側は値を echo しない設計。
+ */
+function logGcpProxyError(res: Response, op: string, body: string): void {
+  console.log(
+    JSON.stringify({
+      event: "gcp_proxy_error",
+      op,
+      status: res.status,
+      body_first_200: body,
+      cf_ray: res.headers.get("cf-ray"),
+      upstream_server: res.headers.get("server"),
+    }),
+  );
+}
+
 // ===========================================================================
 // write 系 (= 旧 packages/rotate-mcp の rotateGcp / createGcp を移植)
 // ===========================================================================
@@ -130,6 +152,7 @@ export async function rotateGcp(
   }
   if (!res.ok) {
     const body = (await res.text()).slice(0, 200);
+    logGcpProxyError(res, "rotate", body);
     return { status: "fail", error: `gcp proxy ${res.status}: ${body}` };
   }
   let parsed: { ok?: boolean; new_version?: string };
@@ -189,6 +212,7 @@ export async function createGcp(
   }
   if (!res.ok) {
     const body = (await res.text()).slice(0, 200);
+    logGcpProxyError(res, "create", body);
     return { status: "fail", error: `gcp proxy ${res.status}: ${body}` };
   }
   let parsed: { ok?: boolean; new_version?: string; created?: boolean };
@@ -270,6 +294,7 @@ export async function mintHealthOAuthJwt(
   }
   if (!res.ok) {
     const body = (await res.text()).slice(0, 200);
+    logGcpProxyError(res, "mint-health-oauth-jwt", body);
     return { status: "fail", error: `gcp proxy ${res.status}: ${body}` };
   }
   let parsed: {
