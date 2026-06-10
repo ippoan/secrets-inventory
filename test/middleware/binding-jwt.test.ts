@@ -35,7 +35,9 @@ describe("bindingJwtMiddleware", () => {
     expect(www).toContain(
       'resource_metadata="https://auth.invalid/.well-known/oauth-protected-resource/security-inventory"',
     );
-    expect(www).toContain('error="invalid_token"');
+    // header 欠落は RFC 6750 的に request-shape の問題なので `invalid_request`
+    // (lib 昇格時に正規化された semantics — Refs ippoan/mcp-cf-workers#46)。
+    expect(www).toContain('error="invalid_request"');
   });
 
   it("401 when scheme is not Bearer", async () => {
