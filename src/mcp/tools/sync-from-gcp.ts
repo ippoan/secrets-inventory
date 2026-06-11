@@ -35,6 +35,8 @@ import {
 const NAME_PATTERN = /^[A-Za-z][A-Za-z0-9_-]{0,127}$/;
 const SYNC_TARGETS: readonly SyncFromGcpTarget[] = ["gh", "cf"] as const;
 const VISIBILITY_OPTIONS = ["all", "private", "selected"] as const;
+// GitHub org (login) 名: 英数字 + ハイフン (先頭末尾は英数字)、39 文字以内。
+const GH_ORG_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/;
 
 export const syncFromGcpInputSchema = z
   .object({
@@ -54,6 +56,16 @@ export const syncFromGcpInputSchema = z
       .regex(NAME_PATTERN)
       .optional()
       .describe("GitHub 側 secret 名を src と変えたい場合に指定 (省略時は src と同名)"),
+    gh_org: z
+      .string()
+      .regex(GH_ORG_PATTERN)
+      .optional()
+      .describe(
+        "GitHub 側の伝播先 org (例: `ohishi-exp`)。proxy の `GH_EXTRA_ORGS` " +
+          "allowlist 内のみ有効 (allowlist 外は proxy が 400 = allowlist が" +
+          "単一権威)。省略時は default org (= ippoan)。targets に `gh` を" +
+          "含む時だけ指定可。Refs ippoan/secrets-inventory-gcp#49",
+      ),
     cf_name: z
       .string()
       .regex(NAME_PATTERN)
@@ -94,12 +106,18 @@ export const syncFromGcpTool = {
     args: SyncFromGcpToolArgs,
     actorEmail?: string,
   ): Promise<SyncFromGcpResult> => {
+    // cross-field 検証は schema でなくここで行う (superRefine で ZodEffects に
+    // なると /mcp-do の `.shape` 消費が壊れるため)。
+    if (args.gh_org && !args.targets.includes("gh")) {
+      return { status: "fail", error: 'gh_org requires targets to include "gh"' };
+    }
     const ctx = await gcpProxyCtxFromEnv(env, actorEmail);
     return await syncFromGcp(
       {
         srcName: args.name,
         targets: args.targets as SyncFromGcpTarget[],
         ghName: args.gh_name,
+        ghOrg: args.gh_org,
         cfName: args.cf_name,
         visibility: args.visibility,
         scopes: args.scopes,
