@@ -134,6 +134,34 @@ shell ($STORE_PW など) → curl --data-binary @file
               proxy `/cf/secrets`, `/gh/secrets/{name}` (伝播)
 ```
 
+### 別 org の GitHub Actions org secret に配る (`sync_from_gcp` + `gh_org`)
+
+GCP の既存値を**別 org** (例 `ohishi-exp`) の GitHub Actions org secret に伝播する。
+proxy が `ippoan-ci-bot` App の installation token で書くため、**per-org PAT は不要**
+(App が install された org すべてに書ける。Refs ippoan/secrets-inventory-gcp#51)。
+
+```
+# MCP tool: 値は proxy 内で完結、tool-call JSON / context に載らない
+tools/call sync_from_gcp {
+  name: 'CI_APP_ID', targets: ['gh'], gh_org: 'ohishi-exp',
+}
+tools/call sync_from_gcp {
+  name: 'CI_APP_PRIVATE_KEY_PKCS8', targets: ['gh'],
+  gh_org: 'ohishi-exp', gh_name: 'CI_APP_PRIVATE_KEY',
+}
+```
+
+- **前提 (proxy 運用 setup、一度きり)**: App を対象 org に install +
+  Organization permissions → Secrets: Read and write を付与・承認。Cloud Run に
+  `GH_APP_ID_SECRET_NAME` / `GH_APP_PRIVATE_KEY_SECRET_NAME` env + runtime SA への
+  per-secret accessor grant。setup 無し / App mode 無効時は `GH_EXTRA_ORGS`
+  allowlist の per-org PAT に fallback (#49)。
+- **後段の罠 (`secrets: inherit` クロス org 不可)**: 配った secret を別 org の
+  caller が ippoan reusable (`auto-merge.yml@main` 等) で使う時、`secrets: inherit`
+  は **同一 org / enterprise 内の reusable にしか secret を渡さない**。別 org caller
+  は named secret を明示渡しする (`secrets: { CI_APP_ID: ${{ secrets.CI_APP_ID }}, … }`)。
+  詳細は `ippoan/ci-workflows` の CLAUDE.md / auto-merge.yml の error message。
+
 ### placeholder 化済み secret (org Settings からの手動削除待ち)
 
 MCP には secret の hard delete エンドポイントが無い (= 履歴の意図的な保全のため)。

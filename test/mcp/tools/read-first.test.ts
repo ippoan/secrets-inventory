@@ -97,13 +97,18 @@ describe("read_first execute()", () => {
     expect(result.workflows.check_drift).toMatch(/get_drift/);
   });
 
-  it("output never contains a placeholder for sensitive values (smoke test)", async () => {
-    // read_first is the first thing agents see; if accidentally we shipped a
-    // template value like "TOKEN_HERE" or "FAKE_PASSWORD", flag it. This is
-    // a smoke test against future regressions.
+  it("output never contains a placeholder for sensitive VALUES (smoke test)", async () => {
+    // read_first is the first thing agents see; if we accidentally shipped a
+    // real secret VALUE (a PEM block, an actual password literal) flag it.
+    // NOTE: secret *names* like `CI_APP_PRIVATE_KEY` / `STORE_PASSWORD` are
+    // legitimate references in the docs (the cross-org named-secret example
+    // teaches the gotcha), so match value-shaped leaks — not name substrings.
     const result = await readFirstTool.execute();
     const serialised = JSON.stringify(result);
-    expect(serialised).not.toMatch(/PASSWORD/i);
-    expect(serialised).not.toMatch(/PRIVATE[_ ]KEY/i);
+    // PEM private key material (the highest-value leak shape).
+    expect(serialised).not.toMatch(/-----BEGIN[^-]*PRIVATE KEY-----/);
+    // a password assigned a concrete value, e.g. `password: hunter2` /
+    // `PASSWORD="..."` — but not the bare word in a secret name.
+    expect(serialised).not.toMatch(/password\s*[:=]\s*\S/i);
   });
 });

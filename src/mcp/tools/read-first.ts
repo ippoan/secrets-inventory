@@ -165,6 +165,33 @@ const WORKFLOWS = {
       "CF_SERVICE_TOKEN_PROTECTED_IDS に列挙した id は rotate/delete とも拒否される。" +
       "両 tool とも binding_jwt の mcp.write scope 必須。",
   ].join("\n"),
+  distribute_secret_to_other_org: [
+    "別 org (例 ohishi-exp) の GitHub Actions org secret に値を配る " +
+      "(Refs ippoan/secrets-inventory-gcp#51)。**per-org PAT は不要** — " +
+      "`ippoan-ci-bot` App の installation token で App が install された org に書ける。",
+    "",
+    "  # GCP の既存値を別 org に伝播 (値は proxy 内で完結、context に載らない)",
+    "  tools/call sync_from_gcp {",
+    "    name: 'CI_APP_ID', targets: ['gh'], gh_org: 'ohishi-exp',",
+    "  }",
+    "  tools/call sync_from_gcp {",
+    "    name: 'CI_APP_PRIVATE_KEY_PKCS8', targets: ['gh'],",
+    "    gh_org: 'ohishi-exp', gh_name: 'CI_APP_PRIVATE_KEY',",
+    "  }",
+    "",
+    "前提 (proxy 運用 setup、一度きり): App を対象 org に install + " +
+      "Organization permissions → Secrets: Read and write を付与・承認。" +
+      "Cloud Run に GH_APP_ID_SECRET_NAME / GH_APP_PRIVATE_KEY_SECRET_NAME env + " +
+      "runtime SA への per-secret accessor grant。",
+    "",
+    "重要な後段の罠: 投入した secret を **別 org の caller が ippoan reusable で使う** " +
+      "時、`secrets: inherit` はクロス org で効かない (= 同一 org/enterprise 内の " +
+      "reusable にしか secret を渡さない)。別 org caller は named secret を明示渡し:",
+    "",
+    "    secrets:",
+    "      CI_APP_ID: ${{ secrets.CI_APP_ID }}",
+    "      CI_APP_PRIVATE_KEY: ${{ secrets.CI_APP_PRIVATE_KEY }}",
+  ].join("\n"),
 };
 
 interface ReadFirstResult {
