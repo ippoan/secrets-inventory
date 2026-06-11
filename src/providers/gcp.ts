@@ -333,6 +333,12 @@ export interface SyncFromGcpArgs {
   targets: SyncFromGcpTarget[];
   /** GitHub Actions secret 名 (省略時は srcName) */
   ghName?: string;
+  /**
+   * GitHub 側の伝播先 org。proxy の `GH_EXTRA_ORGS` allowlist 内のみ有効
+   * (allowlist が単一権威、worker は形式 check のみ)。省略時は proxy の
+   * default org (= `GITHUB_ORG`、現状 ippoan)。Refs ippoan/secrets-inventory-gcp#49
+   */
+  ghOrg?: string;
   /** CF Secrets Store 名 (省略時は srcName) */
   cfName?: string;
   /** GitHub visibility — proxy 側 default "all" */
@@ -373,6 +379,7 @@ export async function syncFromGcp(
   const u = new URL(`${ctx.proxyUrl}/sync-from-gcp/${encodeURIComponent(args.srcName)}`);
   u.searchParams.set("targets", args.targets.join(","));
   if (args.ghName) u.searchParams.set("gh_name", args.ghName);
+  if (args.ghOrg) u.searchParams.set("gh_org", args.ghOrg);
   if (args.cfName) u.searchParams.set("cf_name", args.cfName);
   if (args.visibility) u.searchParams.set("visibility", args.visibility);
   if (args.scopes && args.scopes.length > 0) {

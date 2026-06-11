@@ -19,6 +19,8 @@ import {
 // `read_first` の workflows にも mint → sync の 2 段運用として記載する。
 
 const SECRET_NAME_PATTERN = /^[A-Za-z][A-Za-z0-9_-]{0,127}$/;
+// GitHub org (login) 名: 英数字 + ハイフン (先頭末尾は英数字)、39 文字以内。
+const GH_ORG_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/;
 const VALID_TARGETS: SyncFromGcpTarget[] = ["gh", "cf"];
 const VALID_VISIBILITY = new Set(["all", "private", "selected"]);
 
@@ -73,6 +75,16 @@ syncFromGcpRoutes.post("/mcp/sync-from-gcp/:name", async (c) => {
     return c.json({ error: "invalid cf_name" }, 400);
   }
 
+  // GitHub 側の伝播先 org (Refs ippoan/secrets-inventory-gcp#49)。allowlist
+  // (GH_EXTRA_ORGS) の判定は proxy が単一権威、worker は形式 check のみ。
+  const ghOrg = c.req.query("gh_org") || undefined;
+  if (ghOrg !== undefined && !GH_ORG_PATTERN.test(ghOrg)) {
+    return c.json({ error: "invalid gh_org" }, 400);
+  }
+  if (ghOrg !== undefined && !targets.includes("gh")) {
+    return c.json({ error: 'gh_org requires targets to include "gh"' }, 400);
+  }
+
   const visibilityRaw = c.req.query("visibility");
   if (visibilityRaw !== undefined && !VALID_VISIBILITY.has(visibilityRaw)) {
     return c.json({ error: "invalid visibility (use all / private / selected)" }, 400);
@@ -111,6 +123,7 @@ syncFromGcpRoutes.post("/mcp/sync-from-gcp/:name", async (c) => {
       srcName,
       targets,
       ghName,
+      ghOrg,
       cfName,
       visibility,
       scopes,

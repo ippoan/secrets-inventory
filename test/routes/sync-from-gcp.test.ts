@@ -348,3 +348,52 @@ describe("POST /mcp/sync-from-gcp/:name — upstream failures", () => {
     expect(body.error).toMatch(/bad json/);
   });
 });
+
+describe("POST /mcp/sync-from-gcp/:name — gh_org (Refs ippoan/secrets-inventory-gcp#49)", () => {
+  it("forwards gh_org to upstream query", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json({ ok: true, source: "x", results: {} }),
+    );
+
+    const app = buildApp(writeClaims);
+    const res = await app.fetch(
+      new Request(
+        "https://x.invalid/mcp/sync-from-gcp/CI_APP_PRIVATE_KEY_PKCS8" +
+          "?targets=gh&gh_org=ohishi-exp&gh_name=CI_APP_PRIVATE_KEY",
+        { method: "POST" },
+      ),
+      env(),
+    );
+    expect(res.status).toBe(200);
+    const urlStr = String(fetchSpy.mock.calls[0]![0]);
+    expect(urlStr).toContain("gh_org=ohishi-exp");
+  });
+
+  it("returns 400 on invalid gh_org", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const app = buildApp(writeClaims);
+    const res = await app.fetch(
+      new Request(
+        "https://x.invalid/mcp/sync-from-gcp/MY_SECRET?targets=gh&gh_org=-bad",
+        { method: "POST" },
+      ),
+      env(),
+    );
+    expect(res.status).toBe(400);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("returns 400 when gh_org is given without gh target", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const app = buildApp(writeClaims);
+    const res = await app.fetch(
+      new Request(
+        "https://x.invalid/mcp/sync-from-gcp/MY_SECRET?targets=cf&gh_org=ohishi-exp",
+        { method: "POST" },
+      ),
+      env(),
+    );
+    expect(res.status).toBe(400);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+});

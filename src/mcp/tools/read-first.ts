@@ -125,6 +125,7 @@ const WORKFLOWS = {
     "    name: 'MY_SECRET',",
     "    targets: ['gh', 'cf'],",
     "    cf_name: 'my-secret',         # 別名にする場合のみ",
+    "    gh_org: 'ohishi-exp',         # 別 org に伝播する場合のみ (proxy の GH_EXTRA_ORGS allowlist 内)",
     "    fail_if_exists: false,        # 既存上書き許可",
     "  }",
     "",

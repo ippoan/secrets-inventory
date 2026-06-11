@@ -173,3 +173,74 @@ describe("sync_from_gcp tool", () => {
     expect(argsAsString).not.toMatch(/value|secret_val/);
   });
 });
+
+describe("sync_from_gcp tool — gh_org (Refs ippoan/secrets-inventory-gcp#49)", () => {
+  it("forwards gh_org to the proxy query", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json({
+        ok: true,
+        source: "CI_APP_PRIVATE_KEY_PKCS8",
+        results: { gh: { status: "ok", secret_name: "CI_APP_PRIVATE_KEY", created: true } },
+      }),
+    );
+
+    const res = await rpc(env(), writeClaims, {
+      method: "tools/call",
+      params: {
+        name: "sync_from_gcp",
+        arguments: {
+          name: "CI_APP_PRIVATE_KEY_PKCS8",
+          targets: ["gh"],
+          gh_name: "CI_APP_PRIVATE_KEY",
+          gh_org: "ohishi-exp",
+        },
+      },
+    });
+    const result = res.result as { isError: boolean; content: Array<{ text: string }> };
+    expect(result.isError).toBe(false);
+    const payload = JSON.parse(result.content[0]!.text);
+    expect(payload.status).toBe("ok");
+
+    const callUrl = String(fetchSpy.mock.calls[0]![0]);
+    expect(callUrl).toContain("gh_org=ohishi-exp");
+    expect(callUrl).toContain("gh_name=CI_APP_PRIVATE_KEY");
+  });
+
+  it("rejects gh_org when targets does not include gh", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+    const res = await rpc(env(), writeClaims, {
+      method: "tools/call",
+      params: {
+        name: "sync_from_gcp",
+        arguments: {
+          name: "MY_SECRET",
+          targets: ["cf"],
+          gh_org: "ohishi-exp",
+        },
+      },
+    });
+    const result = res.result as { isError?: boolean; content: Array<{ text: string }> };
+    const payload = JSON.parse(result.content[0]!.text);
+    expect(payload.status).toBe("fail");
+    expect(payload.error).toMatch(/gh_org/);
+    // proxy には到達しない (= 早期 reject)
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("rejects invalid gh_org pattern via schema", async () => {
+    const res = await rpc(env(), writeClaims, {
+      method: "tools/call",
+      params: {
+        name: "sync_from_gcp",
+        arguments: {
+          name: "MY_SECRET",
+          targets: ["gh"],
+          gh_org: "-leading-hyphen",
+        },
+      },
+    });
+    const result = res.result as { isError?: boolean };
+    expect(result.isError).toBe(true);
+  });
+});
