@@ -189,6 +189,106 @@ export async function createGithub(
   return { status: "ok", created: parsed.created === true };
 }
 
+// ===========================================================================
+// GitHub Actions **repo variables** (平文 config、secret ではない)。
+// proxy endpoint (ippoan/secrets-inventory-gcp の /gh/variables):
+//   - GET /gh/variables?repo=owner/name        → list (value 含む)
+//   - PUT /gh/variables/{name}?repo=owner/name → upsert (proxy が GET→POST/PATCH)
+// secret と違い sealed box 暗号化はしない (平文)。
+// ===========================================================================
+
+export interface GhRepoVariable {
+  name: string;
+  value: string;
+  created_at: string;
+  updated_at: string;
+}
+
+interface GhVariablesListResponse {
+  variables?: GhRepoVariable[];
+}
+
+/** repo の Actions variables を list (value 含む = 平文 config なので隠さない)。 */
+export async function listGitHubRepoVariables(
+  repo: string,
+  ctx: GhProxyContext,
+): Promise<GhRepoVariable[]> {
+  const res = await fetch(
+    `${ctx.proxyUrl}/gh/variables?repo=${encodeURIComponent(repo)}`,
+    {
+      method: "GET",
+      headers: {
+        "X-Inventory-API-Key": ctx.apiKey,
+        Accept: "application/json",
+        "User-Agent": "secrets-inventory",
+      },
+    },
+  );
+  if (!res.ok) {
+    const body = (await res.text()).slice(0, 200);
+    throw new GithubProxyError(res.status, `GH proxy ${res.status}: ${body}`);
+  }
+  const raw = (await res.json()) as GhVariablesListResponse;
+  return raw.variables ?? [];
+}
+
+export interface GhSetVariableArgs {
+  repo: string;
+  name: string;
+  value: string;
+}
+
+export interface GhSetVariableResult {
+  status: "ok" | "fail";
+  /** 新規作成 = true、既存更新 = false (proxy の事前 GET 判定に基づく)。 */
+  created?: boolean;
+  error?: string;
+}
+
+/**
+ * repo Actions variable を upsert する。proxy が事前 GET で存在判定し、無ければ
+ * POST (create) / 有れば PATCH (update) する。失敗は status="fail" で返し throw
+ * しない (rotate/create と同じ規約)。
+ */
+export async function setGitHubRepoVariable(
+  args: GhSetVariableArgs,
+  ctx: GhProxyContext,
+): Promise<GhSetVariableResult> {
+  let res: Response;
+  try {
+    res = await fetch(
+      `${ctx.proxyUrl}/gh/variables/${encodeURIComponent(args.name)}?repo=${encodeURIComponent(args.repo)}`,
+      {
+        method: "PUT",
+        headers: proxyHeaders(ctx, false),
+        body: JSON.stringify({ value: args.value }),
+      },
+    );
+  } catch (err) {
+    return {
+      status: "fail",
+      error: `gh proxy network: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+  if (!res.ok) {
+    const body = (await res.text()).slice(0, 200);
+    return { status: "fail", error: `gh proxy ${res.status}: ${body}` };
+  }
+  let parsed: { ok?: boolean; created?: boolean };
+  try {
+    parsed = (await res.json()) as typeof parsed;
+  } catch (err) {
+    return {
+      status: "fail",
+      error: `gh proxy bad json: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+  if (!parsed.ok) {
+    return { status: "fail", error: "gh proxy returned ok=false" };
+  }
+  return { status: "ok", created: parsed.created === true };
+}
+
 function proxyHeaders(ctx: GhProxyContext, failIfExists: boolean): Record<string, string> {
   const h: Record<string, string> = {
     "X-Inventory-API-Key": ctx.apiKey,

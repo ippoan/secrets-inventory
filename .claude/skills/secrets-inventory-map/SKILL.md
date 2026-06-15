@@ -1,8 +1,8 @@
 ---
 name: secrets-inventory-map
-generated-from: secrets-inventory:05298ee6edc5c638312f4b416fcd3c2ba62242f3
+generated-from: secrets-inventory:efaeac91b0b08cd988357a2ce1e664d09633e8ee
 paths: [src/]
-description: ippoan/secrets-inventory (Cloudflare Workers + Hono、secret/service-account 監査 + 投入/rotate の MCP server) の構造ナビゲーション。GCP=SoT・メタのみ read・値は会話に載せない方針、CF Access (人間) と binding_jwt (MCP) の二重認証、secrets-inventory-gcp Cloud Run proxy 集約、stateless `/mcp` と stateful `/mcp-do` dual-path の配置と gotcha を 1 枚にまとめる。トリガー:「secrets-inventory」「secret 監査」「create_secret」「rotate_secret」「service account 監査」「drift」「snapshot」「binding_jwt」「mcp.write scope」「GCP proxy」「secret-upload」「SecretsInventoryMcp」等。
+description: ippoan/secrets-inventory (Cloudflare Workers + Hono、secret/service-account 監査 + 投入/rotate の MCP server) の構造ナビゲーション。GCP=SoT・メタのみ read・値は会話に載せない方針、CF Access (人間) と binding_jwt (MCP) の二重認証、secrets-inventory-gcp Cloud Run proxy 集約、stateless `/mcp` と stateful `/mcp-do` dual-path の配置と gotcha を 1 枚にまとめる。トリガー:「secrets-inventory」「secret 監査」「create_secret」「rotate_secret」「service account 監査」「drift」「snapshot」「binding_jwt」「mcp.write scope」「GCP proxy」「secret-upload」「SecretsInventoryMcp」「set_repo_variable」「repo variable」「Actions variable」等。
 ---
 
 # secrets-inventory-map — ippoan/secrets-inventory 構造ナビゲーション
@@ -30,10 +30,17 @@ Cloudflare / GitHub) すべて `secrets-inventory-gcp` Cloud Run proxy 経由で
 
 ### MCP tools (`src/mcp/tools/*`, registry が single source)
 
-read: `list_inventory` `get_snapshot` `get_drift` `list_service_accounts`
+read: `list_inventory` `get_snapshot` `get_drift` `list_service_accounts` `list_repo_variables`
 write (`requiresScope: mcp.write`): `create_secret` `rotate_secret` `dry_run_rotate`
 `sync_from_gcp` `create_service_token` `rotate_service_token` `delete_service_token`
+`set_repo_variable`
 （`rotate_secret` 等は type-to-confirm + protected-id ガード付き）
+
+`set_repo_variable` / `list_repo_variables` は **GitHub Actions repo variable**
+(平文 config、secret ではない) を proxy `/gh/variables` 経由で操作する
+(`src/mcp/tools/repo-variable.ts` + `src/providers/github.ts`)。value は config 値
+なので tool-call JSON に載せてよい (秘匿値は `create_secret` を使う)。用途例:
+CI deploy gate の `STAGING_DEPLOY_ENABLED=true` を Settings UI を触らず設定。
 
 ## entrypoint (`src/index.ts` の route)
 
