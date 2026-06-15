@@ -3,6 +3,8 @@ import {
   listGitHubOrgSecrets,
   rotateGithub,
   createGithub,
+  setGitHubRepoVariable,
+  listGitHubRepoVariables,
   GithubProxyError,
   type GhProxyContext,
 } from "../../src/providers/github";
@@ -142,5 +144,78 @@ describe("createGithub (via proxy)", () => {
     const init = fetchSpy.mock.calls[0]?.[1] as RequestInit | undefined;
     const headers = init?.headers as Record<string, string> | undefined;
     expect(headers?.["X-Fail-If-Exists"]).toBeUndefined();
+  });
+});
+
+describe("setGitHubRepoVariable (via proxy)", () => {
+  it("PUTs /gh/variables/{name}?repo=... with raw value + maps created", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json({ ok: true, created: true }),
+    );
+    const res = await setGitHubRepoVariable(
+      { repo: "ippoan/rust-flickr", name: "STAGING_DEPLOY_ENABLED", value: "true" },
+      ctx,
+    );
+    expect(res.status).toBe("ok");
+    expect(res.created).toBe(true);
+    const url = String(fetchSpy.mock.calls[0]?.[0]);
+    expect(url).toContain("/gh/variables/STAGING_DEPLOY_ENABLED");
+    expect(url).toContain("repo=ippoan%2Frust-flickr");
+    const init = fetchSpy.mock.calls[0]?.[1] as RequestInit | undefined;
+    expect(init?.method).toBe("PUT");
+    expect(String(init?.body)).toContain("true");
+  });
+
+  it("created=false when proxy reports update", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json({ ok: true, created: false }),
+    );
+    const res = await setGitHubRepoVariable(
+      { repo: "ippoan/rust-flickr", name: "FOO", value: "bar" },
+      ctx,
+    );
+    expect(res.status).toBe("ok");
+    expect(res.created).toBe(false);
+  });
+
+  it("fail on proxy 502", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("oops", { status: 502 }));
+    const res = await setGitHubRepoVariable(
+      { repo: "ippoan/rust-flickr", name: "FOO", value: "bar" },
+      ctx,
+    );
+    expect(res.status).toBe("fail");
+    expect(res.error).toMatch(/502/);
+  });
+
+  it("fail when proxy returns ok=false", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json({ ok: false }));
+    const res = await setGitHubRepoVariable(
+      { repo: "ippoan/rust-flickr", name: "FOO", value: "bar" },
+      ctx,
+    );
+    expect(res.status).toBe("fail");
+  });
+});
+
+describe("listGitHubRepoVariables (via proxy)", () => {
+  it("returns variables with value (平文 config)", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json({
+        variables: [
+          { name: "STAGING_DEPLOY_ENABLED", value: "true", created_at: "2026-01-01", updated_at: "2026-05-01" },
+        ],
+      }),
+    );
+    const vars = await listGitHubRepoVariables("ippoan/rust-flickr", ctx);
+    expect(vars).toHaveLength(1);
+    expect(vars[0]?.name).toBe("STAGING_DEPLOY_ENABLED");
+    expect(vars[0]?.value).toBe("true");
+    expect(String(fetchSpy.mock.calls[0]?.[0])).toContain("/gh/variables?repo=ippoan%2Frust-flickr");
+  });
+
+  it("throws GithubProxyError on non-2xx", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("nope", { status: 403 }));
+    await expect(listGitHubRepoVariables("ippoan/rust-flickr", ctx)).rejects.toThrow(GithubProxyError);
   });
 });

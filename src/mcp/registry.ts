@@ -24,6 +24,7 @@ import {
   deleteServiceTokenTool,
   createServiceTokenTool,
 } from "./tools/service-token-write";
+import { setRepoVariableTool, listRepoVariablesTool } from "./tools/repo-variable";
 
 export interface ToolEntry<S extends z.ZodTypeAny> {
   name: string;
@@ -68,4 +69,9 @@ export const STATIC_TOOLS: ToolEntry<z.ZodTypeAny>[] = [
   // Phase 3 (Refs #66): service token の新規発行。client_secret は proxy→SM
   // 直書きで context に載らない。
   createServiceTokenTool as unknown as ToolEntry<z.ZodTypeAny>,
+  // GitHub Actions repo variables (平文 config、secret ではない)。proxy の
+  // /gh/variables 経由。set は mcp.write gate、list は read。value は config 値
+  // なので tool-call JSON に載せてよい (秘匿値は create_secret/rotate_secret)。
+  setRepoVariableTool as unknown as ToolEntry<z.ZodTypeAny>,
+  listRepoVariablesTool as unknown as ToolEntry<z.ZodTypeAny>,
 ];
