@@ -85,7 +85,7 @@ describe("MCP server (read MCP)", () => {
     expect(result.capabilities.tools).toBeDefined();
   });
 
-  it("tools/list returns all 13 tools (MUST_READ_FIRST + 4 read + 8 write) with JSON schemas", async () => {
+  it("tools/list returns all 15 tools (MUST_READ_FIRST + 5 read + 9 write) with JSON schemas", async () => {
     const res = await rpc(env(), { method: "tools/list" });
     const result = res.result as {
       tools: Array<{ name: string; description: string; inputSchema: unknown }>;
@@ -101,9 +101,11 @@ describe("MCP server (read MCP)", () => {
       "get_drift",
       "get_snapshot",
       "list_inventory",
+      "list_repo_variables",
       "list_service_accounts",
       "rotate_secret",
       "rotate_service_token",
+      "set_repo_variable",
       "sync_from_gcp",
     ]);
     for (const t of result.tools) {
