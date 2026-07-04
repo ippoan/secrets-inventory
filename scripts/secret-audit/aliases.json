@@ -1,0 +1,4 @@
+{
+  "_comment": "GCP secret 名 → GitHub Actions 側で使われる secret 名 (別名) の対応。exact / kebab⇔SNAKE 正規化で一致しない cross-name だけをここに書く (Refs #86)。",
+  "CI_APP_PRIVATE_KEY_PKCS8": ["CI_APP_PRIVATE_KEY"]
+}
