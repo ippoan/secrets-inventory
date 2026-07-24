@@ -43,6 +43,9 @@ export function baseTestEnv(
     MCP_SERVER_VERSION: "0.0.2",
     MCP_PROTOCOL_VERSION: "2025-03-26",
     AUTH_WORKER_ORIGIN: "https://auth.invalid",
+    // 全 test は `introspectFetch` で fetch を直接 stub するため、この binding
+    // が実際に呼ばれることはない (呼ばれたらテスト側の stub 漏れ)。
+    AUTH_WORKER: { fetch: async () => new Response(null, { status: 501 }) } as unknown as Fetcher,
     MCP_DO: mockDurableObjectNamespace(),
     ...overrides,
   };

@@ -48,6 +48,15 @@
     // anchor URL としても使う。Refs #43。
     "AUTH_WORKER_ORIGIN": "https://auth.ippoan.org"
   },
+  // introspect (/mcp/introspect, stateless版もDO+WS版も両方) は service binding
+  // 経由 (同一account、Refs ippoan/auth-worker#435 / ippoan/mcp-cf-workers#60,#63)。
+  // 上のAUTH_WORKER_ORIGINは変更しない (WWW-Authenticateのresource_metadata表示用)。
+  "services": [
+    {
+      "binding": "AUTH_WORKER",
+      "service": "auth-worker"
+    }
+  ],
   "secrets_store_secrets": [
     {
       "binding": "GCP_PROXY_API_KEY",
@@ -108,6 +117,12 @@
         "MCP_PROTOCOL_VERSION": "2025-03-26",
         "AUTH_WORKER_ORIGIN": "https://auth-staging.ippoan.org"
       },
+      "services": [
+        {
+          "binding": "AUTH_WORKER",
+          "service": "auth-worker-staging"
+        }
+      ],
       "secrets_store_secrets": [
         {
           "binding": "GCP_PROXY_API_KEY",

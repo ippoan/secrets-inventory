@@ -63,6 +63,8 @@ export interface Env {
   MCP_SERVER_VERSION: string;
   MCP_PROTOCOL_VERSION: string;
   AUTH_WORKER_ORIGIN: string;
+  /** auth-worker への Service Binding (`/mcp/introspect` 呼び出し用、Refs #93)。 */
+  AUTH_WORKER: Fetcher;
 
   // DO + WebSocket (stateful) MCP transport (Refs #70)。dual-path で `/mcp-do`
   // に追加した DO session の binding。class は `SecretsInventoryMcp`

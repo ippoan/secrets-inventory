@@ -25,6 +25,7 @@ function mkEnv(): Env {
     MCP_SERVER_VERSION: "0.0.1",
     MCP_PROTOCOL_VERSION: "2025-03-26",
     AUTH_WORKER_ORIGIN: "https://auth.invalid",
+    AUTH_WORKER: { fetch: async () => new Response(null, { status: 501 }) } as unknown as Fetcher,
     MCP_DO: {} as unknown as DurableObjectNamespace,
   };
 }
