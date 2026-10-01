@@ -37,6 +37,8 @@ const SYNC_TARGETS: readonly SyncFromGcpTarget[] = ["gh", "cf"] as const;
 const VISIBILITY_OPTIONS = ["all", "private", "selected"] as const;
 // GitHub org (login) 名: 英数字 + ハイフン (先頭末尾は英数字)、39 文字以内。
 const GH_ORG_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/;
+// GitHub repo 名 (owner/ 無し)。`.` / `..` は pattern を通るので execute で弾く。
+const GH_REPO_PATTERN = /^[A-Za-z0-9._-]{1,100}$/;
 
 export const syncFromGcpInputSchema = z
   .object({
@@ -74,7 +76,18 @@ export const syncFromGcpInputSchema = z
     visibility: z
       .enum(VISIBILITY_OPTIONS)
       .optional()
-      .describe("GitHub Actions secret visibility (proxy default = `all`)"),
+      .describe(
+        "GitHub Actions secret visibility (proxy default = `all`)。" +
+          "`selected` のときは repos が必須。",
+      ),
+    repos: z
+      .array(z.string().regex(GH_REPO_PATTERN, "repo name must match ^[A-Za-z0-9._-]{1,100}$"))
+      .max(50)
+      .optional()
+      .describe(
+        "visibility=selected のとき必須。repo 名の配列 (owner/ を付けない)。" +
+          "org は gh_org (省略時 default org) に固定。",
+      ),
     scopes: z
       .array(z.string())
       .optional()
@@ -111,6 +124,19 @@ export const syncFromGcpTool = {
     if (args.gh_org && !args.targets.includes("gh")) {
       return { status: "fail", error: 'gh_org requires targets to include "gh"' };
     }
+    const hasRepos = args.repos !== undefined && args.repos.length > 0;
+    if (hasRepos && !args.targets.includes("gh")) {
+      return { status: "fail", error: 'repos requires targets to include "gh"' };
+    }
+    if (hasRepos && args.visibility !== "selected") {
+      return { status: "fail", error: 'repos requires visibility="selected"' };
+    }
+    if (args.visibility === "selected" && args.targets.includes("gh") && !hasRepos) {
+      return { status: "fail", error: "repos is required when visibility=selected" };
+    }
+    if (args.repos?.some((r) => r === "." || r === "..")) {
+      return { status: "fail", error: 'repos must not contain "." or ".."' };
+    }
     const ctx = await gcpProxyCtxFromEnv(env, actorEmail);
     return await syncFromGcp(
       {
@@ -121,6 +147,7 @@ export const syncFromGcpTool = {
         cfName: args.cf_name,
         visibility: args.visibility,
         scopes: args.scopes,
+        repos: args.repos,
         failIfExists: args.fail_if_exists,
       },
       ctx,

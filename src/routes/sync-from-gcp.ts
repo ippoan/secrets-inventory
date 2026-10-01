@@ -21,6 +21,9 @@ import {
 const SECRET_NAME_PATTERN = /^[A-Za-z][A-Za-z0-9_-]{0,127}$/;
 // GitHub org (login) 名: 英数字 + ハイフン (先頭末尾は英数字)、39 文字以内。
 const GH_ORG_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/;
+// GitHub repo 名 (owner/ 無し)。proxy `repos` query と同じ形式。
+const GH_REPO_PATTERN = /^[A-Za-z0-9._-]{1,100}$/;
+const MAX_REPOS = 50;
 const VALID_TARGETS: SyncFromGcpTarget[] = ["gh", "cf"];
 const VALID_VISIBILITY = new Set(["all", "private", "selected"]);
 
@@ -96,6 +99,30 @@ syncFromGcpRoutes.post("/mcp/sync-from-gcp/:name", async (c) => {
     ? scopesRaw.split(",").map((s) => s.trim()).filter((s) => s.length > 0)
     : undefined;
 
+  // repos (Refs ippoan/secrets-inventory#96): visibility=selected + gh のとき必須、
+  // それ以外では付けられない (proxy も同じ判定で 400)。
+  const reposRaw = c.req.query("repos");
+  const repos = reposRaw
+    ? reposRaw.split(",").map((s) => s.trim()).filter((s) => s.length > 0)
+    : undefined;
+  const hasRepos = repos !== undefined && repos.length > 0;
+  if (hasRepos) {
+    if (repos.length > MAX_REPOS) {
+      return c.json({ error: `too many repos (max ${MAX_REPOS})` }, 400);
+    }
+    if (repos.some((r) => !GH_REPO_PATTERN.test(r) || r === "." || r === "..")) {
+      return c.json({ error: "invalid repos (repo name only, no owner/)" }, 400);
+    }
+    if (!targets.includes("gh")) {
+      return c.json({ error: 'repos requires targets to include "gh"' }, 400);
+    }
+    if (visibility !== "selected") {
+      return c.json({ error: 'repos requires visibility="selected"' }, 400);
+    }
+  } else if (visibility === "selected" && targets.includes("gh")) {
+    return c.json({ error: "repos is required when visibility=selected" }, 400);
+  }
+
   let failIfExists: boolean | undefined;
   const failRaw = (c.req.query("fail_if_exists") ?? "").toLowerCase();
   switch (failRaw) {
@@ -127,6 +154,7 @@ syncFromGcpRoutes.post("/mcp/sync-from-gcp/:name", async (c) => {
       cfName,
       visibility,
       scopes,
+      repos: hasRepos ? repos : undefined,
       failIfExists,
     },
     ctx,

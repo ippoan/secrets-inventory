@@ -345,6 +345,12 @@ export interface SyncFromGcpArgs {
   visibility?: "all" | "private" | "selected";
   /** CF scopes — proxy 側 default "workers" */
   scopes?: string[];
+  /**
+   * visibility=selected のとき GitHub 側で可視にする repo 名 (owner/ 無し)。
+   * proxy は `repos=a,b` の CSV 1 個で受ける。selected + gh 以外では付けない
+   * (proxy が 400)。Refs ippoan/secrets-inventory#96
+   */
+  repos?: string[];
   /** 既存衝突時の振る舞い — proxy 側 default true */
   failIfExists?: boolean;
 }
@@ -355,6 +361,8 @@ export interface SyncFromGcpProviderResult {
   secret_name?: string;
   secret_id?: string;
   created?: boolean;
+  /** gh + visibility=selected のとき proxy が返す、可視化した repo の個数 */
+  selected_repositories?: number;
 }
 
 export interface SyncFromGcpResult {
@@ -384,6 +392,9 @@ export async function syncFromGcp(
   if (args.visibility) u.searchParams.set("visibility", args.visibility);
   if (args.scopes && args.scopes.length > 0) {
     u.searchParams.set("scopes", args.scopes.join(","));
+  }
+  if (args.repos && args.repos.length > 0) {
+    u.searchParams.set("repos", args.repos.join(","));
   }
   if (args.failIfExists !== undefined) {
     u.searchParams.set("fail_if_exists", args.failIfExists ? "true" : "false");

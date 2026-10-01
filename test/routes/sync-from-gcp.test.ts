@@ -397,3 +397,59 @@ describe("POST /mcp/sync-from-gcp/:name — gh_org (Refs ippoan/secrets-inventor
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 });
+
+describe("POST /mcp/sync-from-gcp/:name — repos (Refs ippoan/secrets-inventory#96)", () => {
+  const post = (query: string) =>
+    buildApp(writeClaims).fetch(
+      new Request(`https://x.invalid/mcp/sync-from-gcp/MY_SECRET?${query}`, { method: "POST" }),
+      env(),
+    );
+
+  it("forwards repos as a single CSV query when visibility=selected", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json({ ok: true, source: "x", results: {} }),
+    );
+    const res = await post("targets=gh&visibility=selected&repos=alc-app,rust-alc-api");
+    expect(res.status).toBe(200);
+    const u = new URL(String(fetchSpy.mock.calls[0]![0]));
+    expect(u.searchParams.getAll("repos")).toEqual(["alc-app,rust-alc-api"]);
+  });
+
+  it("does not add repos to the upstream query when omitted (regression)", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json({ ok: true, source: "x", results: {} }),
+    );
+    await post("targets=gh&visibility=private");
+    const u = new URL(String(fetchSpy.mock.calls[0]![0]));
+    expect(u.searchParams.has("repos")).toBe(false);
+  });
+
+  it.each([
+    ["repos without gh target", "targets=cf&visibility=selected&repos=a", /repos requires targets/],
+    ["repos without visibility=selected", "targets=gh&visibility=all&repos=a", /repos requires visibility/],
+    ["repos with visibility omitted", "targets=gh&repos=a", /repos requires visibility/],
+    ["selected without repos", "targets=gh&visibility=selected", /repos is required/],
+    ["selected with blank repos", "targets=gh&visibility=selected&repos=,", /repos is required/],
+    ["owner/ prefix", "targets=gh&visibility=selected&repos=ippoan/a", /invalid repos/],
+    ["dot repo", "targets=gh&visibility=selected&repos=a,..", /invalid repos/],
+    [
+      "51 repos",
+      `targets=gh&visibility=selected&repos=${Array.from({ length: 51 }, (_, i) => `r${i}`).join(",")}`,
+      /too many repos/,
+    ],
+  ])("returns 400 without calling the proxy: %s", async (_label, query, pattern) => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const res = await post(query);
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toMatch(pattern);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("allows visibility=selected with cf-only targets and no repos", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json({ ok: true, source: "x", results: {} }),
+    );
+    const res = await post("targets=cf&visibility=selected");
+    expect(res.status).toBe(200);
+  });
+});
