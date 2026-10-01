@@ -244,3 +244,84 @@ describe("sync_from_gcp tool — gh_org (Refs ippoan/secrets-inventory-gcp#49)",
     expect(result.isError).toBe(true);
   });
 });
+
+describe("sync_from_gcp tool — repos (Refs ippoan/secrets-inventory#96)", () => {
+  const call = (args: Record<string, unknown>) =>
+    rpc(env(), writeClaims, {
+      method: "tools/call",
+      params: { name: "sync_from_gcp", arguments: { name: "MY_SECRET", ...args } },
+    });
+  const failPayload = (res: Awaited<ReturnType<typeof call>>) => {
+    const result = res.result as { content: Array<{ text: string }> };
+    return JSON.parse(result.content[0]!.text) as { status: string; error?: string };
+  };
+
+  it("forwards repos as a single CSV query when visibility=selected", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json({
+        ok: true,
+        source: "MY_SECRET",
+        results: { gh: { status: "ok", secret_name: "MY_SECRET", selected_repositories: 2 } },
+      }),
+    );
+    const res = await call({
+      targets: ["gh"],
+      visibility: "selected",
+      repos: ["alc-app", "rust-alc-api"],
+    });
+    const result = res.result as { isError: boolean; content: Array<{ text: string }> };
+    expect(result.isError).toBe(false);
+    const payload = JSON.parse(result.content[0]!.text);
+    expect(payload.results.gh.selected_repositories).toBe(2);
+
+    const u = new URL(String(fetchSpy.mock.calls[0]![0]));
+    expect(u.searchParams.getAll("repos")).toEqual(["alc-app,rust-alc-api"]);
+    expect(u.searchParams.get("visibility")).toBe("selected");
+  });
+
+  it("does not add repos to the query when omitted (regression)", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json({ ok: true, source: "MY_SECRET", results: {} }),
+    );
+    await call({ targets: ["gh"], visibility: "private" });
+    const u = new URL(String(fetchSpy.mock.calls[0]![0]));
+    expect(u.searchParams.has("repos")).toBe(false);
+  });
+
+  it.each([
+    ["repos without gh target", { targets: ["cf"], visibility: "selected", repos: ["a"] }, /repos requires targets/],
+    ["repos without visibility=selected", { targets: ["gh"], visibility: "all", repos: ["a"] }, /repos requires visibility/],
+    ["repos with visibility omitted", { targets: ["gh"], repos: ["a"] }, /repos requires visibility/],
+    ["selected without repos", { targets: ["gh"], visibility: "selected" }, /repos is required/],
+    ["selected with empty repos", { targets: ["gh"], visibility: "selected", repos: [] }, /repos is required/],
+    ["dot repo name", { targets: ["gh"], visibility: "selected", repos: ["."] }, /"\."/],
+    ["dot-dot repo name", { targets: ["gh"], visibility: "selected", repos: ["a", ".."] }, /"\.\."/],
+  ])("fails without calling the proxy: %s", async (_label, args, pattern) => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const payload = failPayload(await call(args));
+    expect(payload.status).toBe("fail");
+    expect(payload.error).toMatch(pattern);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("allows visibility=selected with cf-only targets and no repos", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json({ ok: true, source: "MY_SECRET", results: {} }),
+    );
+    const payload = failPayload(await call({ targets: ["cf"], visibility: "selected" }));
+    expect(payload.status).toBe("ok");
+  });
+
+  it.each([
+    ["owner/ prefix", ["ippoan/alc-app"]],
+    ["space", ["a b"]],
+    ["empty name", [""]],
+    ["101 chars", ["a".repeat(101)]],
+    ["51 entries", Array.from({ length: 51 }, (_, i) => `r${i}`)],
+  ])("rejects invalid repos via schema: %s", async (_label, repos) => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const res = await call({ targets: ["gh"], visibility: "selected", repos });
+    expect((res.result as { isError?: boolean }).isError).toBe(true);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+});

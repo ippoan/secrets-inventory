@@ -70,7 +70,8 @@ const HTTP_ROUTES = [
     path: "/mcp/sync-from-gcp/:name",
     purpose:
       "GCP Secret Manager にある secret 値を CF Secrets Store / GitHub Actions org secret に伝播する。" +
-      "?targets=gh,cf&gh_name=NAME&cf_name=name&visibility=all&scopes=workers&fail_if_exists=true。" +
+      "?targets=gh,cf&gh_name=NAME&cf_name=name&visibility=all&scopes=workers&fail_if_exists=true" +
+      "(visibility=selected のときは &repos=a,b が必須、repo 名のみ owner/ 無し)。" +
       "値は proxy memory 内のみ (worker / 応答 body / log に echo されない)。" +
       "source secret の per-secret accessor IAM が runtime SA に grant されている前提。" +
       "Refs ippoan/secrets-inventory-gcp#34。binding_jwt の mcp.write scope 必須。",
@@ -125,6 +126,7 @@ const WORKFLOWS = {
     "    name: 'MY_SECRET',",
     "    targets: ['gh', 'cf'],",
     "    cf_name: 'my-secret',         # 別名にする場合のみ",
+    "    visibility: 'selected', repos: ['a', 'b'],  # 特定 repo だけに見せる場合のみ (repo 名、owner/ 無し)",
     "    gh_org: 'ohishi-exp',         # 別 org に伝播する場合のみ (proxy の GH_EXTRA_ORGS allowlist 内)",
     "    fail_if_exists: false,        # 既存上書き許可",
     "  }",
