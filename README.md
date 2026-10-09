@@ -68,9 +68,9 @@ Bearer で運用する (read / write の blast radius を分離)。
 
 | tool | 引数 | 戻り値 (= dashboard で見える payload と同じ JSON) |
 |---|---|---|
-| `list_inventory` | `{ commit_snapshot?: boolean }` | `InventoryResult` (3 system 突合 + diff) |
+| `list_inventory` | `{ commit_snapshot?: boolean, name_filter?: string }` | `InventoryResult` (3 system 突合 + diff)。`name_filter` (大文字小文字を区別しない部分一致) 指定時は名前が一致する行だけ (`unfiltered_counts` に絞る前の件数)。snapshot は絞る前の全件を書く |
 | `list_service_accounts` | `{}` | `SaInventoryResult` (SA + 5-signal 監査) |
-| `get_drift` | `{ targets?: ("github" \| "cloudflare")[] }` | drift 行のみ filter した payload |
+| `get_drift` | `{ targets?: ("github" \| "cloudflare")[], name_filter?: string }` | drift 行のみ filter した payload (`name_filter` で名前も絞れる) |
 | `get_snapshot` | `{}` | 前回 GCP snapshot (`SnapshotV1` or `null`) |
 
 認証は CF Access (Google OAuth) + Bearer の二重認証必須:
