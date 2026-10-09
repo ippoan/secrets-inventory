@@ -144,6 +144,10 @@ const WORKFLOWS = {
     "",
     "  tools/call get_drift {targets: ['github', 'cloudflare']}",
     "",
+    "  # 特定の secret だけ確かめる (名前の部分一致、大文字小文字を区別しない)。",
+    "  # list_inventory も同じ name_filter を取る (全件は応答上限を超えるので、存在確認はこちら)。",
+    "  tools/call list_inventory {name_filter: 'my_secret'}",
+    "",
     "返ってきた `rows` に in_github=false や in_cloudflare=false が並んでいたら、" +
       "rotate_secret か create_secret で同名を投入して揃える。",
   ].join("\n"),

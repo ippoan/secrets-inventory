@@ -1,6 +1,8 @@
 import { z } from "zod";
 import type { Env } from "../../types";
 import { gatherInventory, type InventoryResult } from "../../inventory";
+import { applyNameFilter } from "../../name-filter";
+import { nameFilterSchema } from "./list-inventory";
 import type { InventoryRow } from "../../diff";
 import type { ServiceTokenRow } from "../../service-tokens";
 
@@ -16,6 +18,7 @@ export const getDriftInputSchema = z
       .describe(
         "drift をチェックする provider 群。省略時は github / cloudflare 両方。",
       ),
+    name_filter: nameFilterSchema,
     reason: z
       .string()
       .max(200)
@@ -42,6 +45,8 @@ export interface GetDriftResult {
   service_token_rows: ServiceTokenRow[];
   errors: InventoryResult["errors"];
   provider_counts: InventoryResult["provider_counts"];
+  /** 入力 `name_filter` をそのままエコー (指定時のみ)。drift 行は名前一致したものだけ。 */
+  name_filter?: string;
   /** 入力 `reason` をそのままエコー (指定時のみ)。audit 文脈の保持用。 */
   reason?: string;
 }
@@ -55,11 +60,13 @@ export const getDriftTool = {
     "null) の行は drift 扱いにせず除外する (= 「不明」を「あり」「無し」の" +
     "どちらにも倒さない)。`service_tokens` は CF Access service token を GCP " +
     "SM の cf_token_id ラベル台帳と突合し、orphan (野良) / missing_in_cf " +
-    "(記録漏れ) を `service_token_rows` に返す。",
+    "(記録漏れ) を `service_token_rows` に返す。`name_filter` (大文字小文字を" +
+    "区別しない部分一致) を渡すと、名前が一致する drift 行だけを返す " +
+    "(service token 行は token 名か SM secret 名のどちらかが一致)。",
   inputSchema: getDriftInputSchema,
   execute: async (env: Env, args: GetDriftArgs): Promise<GetDriftResult> => {
     const targets = (args.targets ?? DRIFT_TARGETS) as DriftTarget[];
-    const inv = await gatherInventory(env);
+    const inv = applyNameFilter(await gatherInventory(env), args.name_filter);
     const rows = inv.rows.filter((r) => isDrifted(r, targets));
     const service_token_rows = targets.includes("service_tokens")
       ? inv.service_tokens.rows.filter((r) => r.status !== "ok")
@@ -71,6 +78,7 @@ export const getDriftTool = {
       service_token_rows,
       errors: inv.errors,
       provider_counts: inv.provider_counts,
+      ...(args.name_filter ? { name_filter: args.name_filter } : {}),
       ...(args.reason ? { reason: args.reason } : {}),
     };
   },

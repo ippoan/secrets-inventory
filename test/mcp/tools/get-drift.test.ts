@@ -118,3 +118,47 @@ describe("get_drift execute — service_tokens target", () => {
     expect(res.service_token_rows).toEqual([]);
   });
 });
+
+describe("get_drift name_filter", () => {
+  it("schema accepts name_filter and rejects empty string", () => {
+    expect(getDriftInputSchema.safeParse({ name_filter: "x" }).success).toBe(true);
+    expect(getDriftInputSchema.safeParse({ name_filter: "" }).success).toBe(false);
+  });
+
+  it("filters drift rows and service_token_rows by name, echoes name_filter", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.includes("/list-secrets")) {
+        return Response.json({
+          secrets: [
+            { name: "Alpha-One" },
+            { name: "beta-two" },
+            { name: "ledger-x", labels: { cf_token_id: "st-gone" } },
+          ],
+        });
+      }
+      if (url.includes("/cf/service-tokens")) {
+        return Response.json({
+          service_tokens: [{ id: "st-wild", name: "wild-token" }],
+        });
+      }
+      if (url.includes("/gh/secrets")) return Response.json({ secrets: [] });
+      if (url.includes("/cf/secrets")) return Response.json({ secrets: [] });
+      return new Response("unexpected: " + url, { status: 500 });
+    });
+
+    const res = await getDriftTool.execute(envWithKv(), { name_filter: "ALPHA" });
+    expect(res.rows.map((r) => r.name)).toEqual(["Alpha-One"]);
+    expect(res.service_token_rows).toEqual([]);
+    expect(res.name_filter).toBe("ALPHA");
+
+    const tok = await getDriftTool.execute(envWithKv(), {
+      targets: ["service_tokens"],
+      name_filter: "wild",
+    });
+    expect(tok.service_token_rows.map((r) => r.cf_token_id)).toEqual(["st-wild"]);
+
+    const none = await getDriftTool.execute(envWithKv(), {});
+    expect("name_filter" in none).toBe(false);
+  });
+});
