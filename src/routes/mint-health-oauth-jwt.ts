@@ -34,7 +34,7 @@ mintHealthOAuthJwtRoutes.post("/mcp/mint-health-oauth-jwt", async (c) => {
     );
   }
 
-  const actorEmail = claims?.github_login ?? undefined;
+  const actorEmail = claims?.github_login ?? claims?.email ?? undefined;
   const ctx = await gcpProxyCtxFromEnv(c.env, actorEmail);
   const result = await mintHealthOAuthJwt(ctx);
   return c.json(result, result.status === "ok" ? 200 : 502);

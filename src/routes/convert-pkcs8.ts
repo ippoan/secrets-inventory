@@ -71,7 +71,7 @@ convertPkcs8Routes.post("/mcp/convert-pkcs8/:name", async (c) => {
     return c.json({ error: "invalid gh_name" }, 400);
   }
 
-  const actorEmail = claims?.github_login ?? undefined;
+  const actorEmail = claims?.github_login ?? claims?.email ?? undefined;
   const ctx = await gcpProxyCtxFromEnv(c.env, actorEmail);
   const result = await convertPkcs8({ srcName, dstName, targets, ghName }, ctx);
   return c.json(result, result.status === "ok" ? 200 : 502);
