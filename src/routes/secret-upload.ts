@@ -154,10 +154,10 @@ secretUploadRoutes.put("/mcp/secret-upload/:name", async (c) => {
     return c.json({ error: TARGETS_MUST_INCLUDE_GCP_MESSAGE }, 400);
   }
 
-  // actorEmail は audit log 用。binding_jwt の github_login を渡す
+  // actorEmail は audit log 用。binding_jwt の github_login (Google flow なら email) を渡す
   // (= github_login @users.noreply.github.com 形式は CLAUDE.md の actor
   // 規約だが、ここでは login をそのまま渡しても proxy 側の log で識別可能)。
-  const actorEmail = claims?.github_login ?? undefined;
+  const actorEmail = claims?.github_login ?? claims?.email ?? undefined;
 
   if (mode === "create") {
     const failIfExists = parseBool(c.req.query("fail_if_exists"), true);

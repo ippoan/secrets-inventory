@@ -56,6 +56,7 @@ CI deploy gate の `STAGING_DEPLOY_ENABLED=true` を Settings UI を触らず設
 
 - **GCP が SoT**。全 system **メタのみ read**、値は会話/UI/log に一切載せない。値が要る時は **GCP コンソールへのリンクで誘導** (worker は viewer のみ)。
 - **proxy 集約 (#45)**: worker が持つ secret binding は `GCP_PROXY_API_KEY` 1 個だけ。CF API token / GitHub PAT は proxy 側 (GCP Secret Manager) に集約。`GCP_PROXY_URL` は Cloud Run staging URL。
+- **監査ログの actor** は `github_login ?? email ?? sub`。GitHub でつなぐと `github_login`、Google でつなぐ (auth-worker が `MCP_RESOURCE_GOOGLE_ORIGINS` で PRM から `/mcp/google` に案内) と `email` が入る (#99)。
 - **read/write 認可分離**: 同一 `/mcp` route 上で write tool だけ `requiresScope: "mcp.write"`。binding_jwt の scope が `mcp.write` を含まないと拒否。
 - **`/mcp/secret-upload/:name` は value を HTTP raw body で受ける** = `create_secret` MCP tool の JSON param に値を載せたくない (LLM context leak 回避) 用途。`secret-inject` skill がこの経路を使う。
 - **MCP は edge で binding_jwt 検証**、CF Access は `/mcp` で **bypassAll** (MCP client は browser OAuth を踏めないため)。代わりに WWW-Authenticate で connector の OAuth 2.1 auto-discovery (RFC 9728) を起動。

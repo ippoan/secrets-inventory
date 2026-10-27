@@ -128,7 +128,7 @@ export async function handleDurableMcp(
 
   const props: SessionProps = {
     scope: claims.scope,
-    actor: claims.github_login || claims.sub,
+    actor: claims.github_login || claims.email || claims.sub,
   };
   // `ctx.props` は agents SDK の引き渡しスロット (McpAgent.serve が読む)。
   (ctx as ExecutionContext & { props?: Record<string, unknown> }).props = props;

@@ -136,12 +136,12 @@ function parseScopes(raw: string | undefined): Set<string> {
 /**
  * `sub` claim から actor email を導出する。auth-worker は sub に GitHub login
  * を入れているため、そのまま email 風に扱える文字列にはならないが、actor
- * audit log には十分。github_login が利用できる場合はそちらを優先 (= 人間が
- * 識別しやすい)。
+ * audit log には十分。github_login (GitHub flow) か email (Google flow) が
+ * あればそちらを優先 (= 人間が識別しやすい)。
  */
 function actorEmailFromClaims(claims: BindingJwtClaims | undefined): string | undefined {
   if (!claims) return undefined;
-  return claims.github_login || claims.sub || undefined;
+  return claims.github_login || claims.email || claims.sub || undefined;
 }
 
 /**

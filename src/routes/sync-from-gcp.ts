@@ -143,7 +143,7 @@ syncFromGcpRoutes.post("/mcp/sync-from-gcp/:name", async (c) => {
       return c.json({ error: "invalid fail_if_exists (use true / false)" }, 400);
   }
 
-  const actorEmail = claims?.github_login ?? undefined;
+  const actorEmail = claims?.github_login ?? claims?.email ?? undefined;
   const ctx = await gcpProxyCtxFromEnv(c.env, actorEmail);
   const result = await syncFromGcp(
     {

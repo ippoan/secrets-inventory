@@ -261,6 +261,25 @@ describe("POST /mcp/sync-from-gcp/:name — happy path", () => {
     expect(urlStr).not.toContain("fail_if_exists=");
   });
 
+  it("uses the Google email as X-Actor-Email when signed in with Google", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json(happyProxyResponse),
+    );
+
+    const app = buildApp({
+      sub: "google:1234",
+      email: "claude@ippoan.org",
+      scope: "mcp.write",
+      exp: Math.floor(Date.now() / 1000) + 3600,
+    } as BindingJwtClaims);
+    await app.fetch(
+      new Request("https://x.invalid/mcp/sync-from-gcp/MY_SECRET?targets=gh", { method: "POST" }),
+      env(),
+    );
+    const headers = (fetchSpy.mock.calls[0]![1] as RequestInit).headers as Record<string, string>;
+    expect(headers["X-Actor-Email"]).toBe("claude@ippoan.org");
+  });
+
   it("omits X-Actor-Email when binding_jwt has no github_login", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       Response.json(happyProxyResponse),
