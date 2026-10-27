@@ -42,7 +42,10 @@ async function dispatchOnce(
   // を持つ tool (= rotate_secret / create_secret) の scope check に使う。
   // /mcp* 配下では middleware が必ず立てるが、defensive に undefined fallback。
   const claims = c.get("bindingJwt") as BindingJwtClaims | undefined;
-  const server = createMcpServer(c.env, claims);
+  // ログインした人の GCP 権限で動く tool (Refs #101) が auth-worker からアクセストークンを
+  // 受け取るのに使う。middleware が検証済みの Bearer をそのまま渡す。
+  const bindingJwt = /^Bearer\s+(.+)$/i.exec(c.req.header("Authorization") ?? "")?.[1];
+  const server = createMcpServer(c.env, claims, { bindingJwt });
   const transport = new WorkerTransport();
   await server.connect(transport);
 

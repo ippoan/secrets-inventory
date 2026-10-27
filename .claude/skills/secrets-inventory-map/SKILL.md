@@ -42,6 +42,15 @@ write (`requiresScope: mcp.write`): `create_secret` `rotate_secret` `dry_run_rot
 なので tool-call JSON に載せてよい (秘匿値は `create_secret` を使う)。用途例:
 CI deploy gate の `STAGING_DEPLOY_ENABLED=true` を Settings UI を触らず設定。
 
+**承認フロー (#101)**: `request_write_access` / `get_write_access` / `generate_secret` は
+**MCP にログインした人 (Google、例 claude@ippoan.org) の GCP 権限**で動く (proxy の SA ではない)。
+アクセストークンは auth-worker の RPC `GoogleGcpTokenEntrypoint#accessToken(binding_jwt)`
+(service binding `AUTH_GCP_TOKEN`、ippoan/auth-worker#691) から受け取り、Worker から PAM /
+Secret Manager の REST を直接呼ぶ (`src/providers/gcp-user.ts`)。binding_jwt は `execute` の
+4 つ目の引数 `ToolContext` で届く (stateless は Authorization、DO は session props)。
+claude@ は PAM の申請者で普段は書けないので、承認前の 403 は `request_write_access` を案内する。
+`generate_secret` は値を Worker で作るので tool-call / 応答に値が載らない (返すのは公開鍵だけ)。
+
 ## entrypoint (`src/index.ts` の route)
 
 - `GET /healthz` (Access 前段、no auth)

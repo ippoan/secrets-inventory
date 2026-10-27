@@ -47,6 +47,8 @@ const TOOLS: ToolEntry<z.ZodTypeAny>[] = [
 interface SessionProps extends Record<string, unknown> {
   scope: string;
   actor?: string;
+  /** ログインした人の GCP 権限で動く tool 用 (Refs #101)。log に出さない。 */
+  bindingJwt?: string;
 }
 
 /**
@@ -77,7 +79,9 @@ export const SecretsInventoryMcp = createDurableMcp<Env, SessionProps>({
             );
           }
           try {
-            const payload = await tool.execute(env, args as never, actor);
+            const payload = await tool.execute(env, args as never, actor, {
+              bindingJwt: props.bindingJwt,
+            });
             return successResult(payload);
           } catch (err) {
             return errorResult(toolErrorMessage(err));
@@ -129,6 +133,7 @@ export async function handleDurableMcp(
   const props: SessionProps = {
     scope: claims.scope,
     actor: claims.github_login || claims.email || claims.sub,
+    bindingJwt: /^Bearer\s+(.+)$/i.exec(request.headers.get("Authorization") ?? "")?.[1],
   };
   // `ctx.props` は agents SDK の引き渡しスロット (McpAgent.serve が読む)。
   (ctx as ExecutionContext & { props?: Record<string, unknown> }).props = props;
