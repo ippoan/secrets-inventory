@@ -25,13 +25,29 @@ import {
   createServiceTokenTool,
 } from "./tools/service-token-write";
 import { setRepoVariableTool, listRepoVariablesTool } from "./tools/repo-variable";
+import { requestWriteAccessTool, getWriteAccessTool } from "./tools/pam-access";
+import { generateSecretTool } from "./tools/generate-secret";
+
+/**
+ * tool 呼び出しの文脈。`bindingJwt` は呼び出し元が提示した binding_jwt そのもので、
+ * ログインした人の権限で GCP を呼ぶ tool (Refs #101) が auth-worker から
+ * アクセストークンを受け取るのに使う。値は log / 応答に出さない。
+ */
+export interface ToolContext {
+  bindingJwt?: string;
+}
 
 export interface ToolEntry<S extends z.ZodTypeAny> {
   name: string;
   description: string;
   inputSchema: S;
   requiresScope?: string;
-  execute: (env: Env, args: z.infer<S>, actorEmail?: string) => Promise<unknown>;
+  execute: (
+    env: Env,
+    args: z.infer<S>,
+    actorEmail?: string,
+    ctx?: ToolContext,
+  ) => Promise<unknown>;
 }
 
 /**
@@ -74,4 +90,9 @@ export const STATIC_TOOLS: ToolEntry<z.ZodTypeAny>[] = [
   // なので tool-call JSON に載せてよい (秘匿値は create_secret/rotate_secret)。
   setRepoVariableTool as unknown as ToolEntry<z.ZodTypeAny>,
   listRepoVariablesTool as unknown as ToolEntry<z.ZodTypeAny>,
+  // 承認フロー (Refs #101): MCP にログインした人 (Google) の GCP 権限で PAM に申請し、
+  // 承認されたら Secret Manager に書く。トークンは auth-worker の RPC から受け取る。
+  requestWriteAccessTool as unknown as ToolEntry<z.ZodTypeAny>,
+  getWriteAccessTool as unknown as ToolEntry<z.ZodTypeAny>,
+  generateSecretTool as unknown as ToolEntry<z.ZodTypeAny>,
 ];

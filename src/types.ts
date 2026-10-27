@@ -26,6 +26,11 @@ export interface ProviderListError {
   error: string;
 }
 
+/** `GoogleGcpTokenEntrypoint#accessToken` の戻り値 (auth-worker の AlcRpcResult)。 */
+export interface GcpTokenRpc {
+  accessToken(bindingJwt: string): Promise<{ status: number; body: string; contentType: string | null }>;
+}
+
 export interface Env {
   // Cloudflare Access (Google OAuth)
   CF_ACCESS_TEAM_DOMAIN: string;
@@ -65,6 +70,11 @@ export interface Env {
   AUTH_WORKER_ORIGIN: string;
   /** auth-worker への Service Binding (`/mcp/introspect` 呼び出し用、Refs #93)。 */
   AUTH_WORKER: Fetcher;
+  /**
+   * auth-worker の RPC `GoogleGcpTokenEntrypoint` (Refs #101、ippoan/auth-worker#691)。
+   * `/mcp/google-gcp` でログインした人の短命 GCP アクセストークンを返す。
+   */
+  AUTH_GCP_TOKEN?: GcpTokenRpc;
 
   // DO + WebSocket (stateful) MCP transport (Refs #70)。dual-path で `/mcp-do`
   // に追加した DO session の binding。class は `SecretsInventoryMcp`

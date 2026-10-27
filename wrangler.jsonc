@@ -55,6 +55,13 @@
     {
       "binding": "AUTH_WORKER",
       "service": "auth-worker"
+    },
+    {
+      // MCP にログインした人の GCP アクセストークンを受け取る RPC (Refs #101、
+      // ippoan/auth-worker#691)。承認フロー用の tool だけが使う。
+      "binding": "AUTH_GCP_TOKEN",
+      "service": "auth-worker",
+      "entrypoint": "GoogleGcpTokenEntrypoint"
     }
   ],
   "secrets_store_secrets": [
@@ -121,6 +128,11 @@
         {
           "binding": "AUTH_WORKER",
           "service": "auth-worker-staging"
+        },
+        {
+          "binding": "AUTH_GCP_TOKEN",
+          "service": "auth-worker-staging",
+          "entrypoint": "GoogleGcpTokenEntrypoint"
         }
       ],
       "secrets_store_secrets": [

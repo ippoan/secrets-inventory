@@ -11,7 +11,7 @@ import type { BindingJwtClaims } from "../middleware/binding-jwt";
 import { GcpUnavailableError } from "../inventory";
 import { GcpIamUnavailableError } from "./tools/list-service-accounts";
 import { readFirstTool } from "./tools/read-first";
-import { STATIC_TOOLS, type ToolEntry } from "./registry";
+import { STATIC_TOOLS, type ToolContext, type ToolEntry } from "./registry";
 
 // MCP tool 全体は registry (`STATIC_TOOLS`) + `readFirstTool` を結合したもの。
 // read_first は最初に呼んでもらいたい想定で **先頭** に置き、tools/list で
@@ -32,7 +32,7 @@ const TOOLS: ToolEntry<z.ZodTypeAny>[] = [
  * `claims` 引数は binding_jwt middleware が `c.get("bindingJwt")` から取り
  * 出したもの。`scope` field を見て write tool を gate する。
  */
-export function createMcpServer(env: Env, claims?: BindingJwtClaims): Server {
+export function createMcpServer(env: Env, claims?: BindingJwtClaims, ctx?: ToolContext): Server {
   const scopes = parseScopes(claims?.scope);
   const actorEmail = actorEmailFromClaims(claims);
 
@@ -75,7 +75,7 @@ export function createMcpServer(env: Env, claims?: BindingJwtClaims): Server {
     }
 
     try {
-      const payload = await tool.execute(env, parsed.data, actorEmail);
+      const payload = await tool.execute(env, parsed.data, actorEmail, ctx);
       return successResult(payload);
     } catch (err) {
       return errorResult(toolErrorMessage(err));
